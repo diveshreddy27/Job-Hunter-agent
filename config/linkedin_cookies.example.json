@@ -1,0 +1,22 @@
+[
+  {
+    "name": "li_at",
+    "value": "YOUR_LI_AT_SESSION_TOKEN",
+    "domain": ".linkedin.com",
+    "path": "/",
+    "expires": 1999999999,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "None"
+  },
+  {
+    "name": "JSESSIONID",
+    "value": "\"ajax:YOUR_JSESSIONID\"",
+    "domain": ".linkedin.com",
+    "path": "/",
+    "expires": 1999999999,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "None"
+  }
+]

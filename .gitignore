@@ -1,0 +1,43 @@
+# ── Secrets ──────────────────────────────────────────────────
+.env
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.venv/
+
+# ── Data (runtime — not source code) ─────────────────────────
+data/
+
+# ── Personal / private config (example files ARE committed) ──
+config/candidate_profile.py
+config/linkedin_cookies.json
+
+# ── Resume (personal document — example README is committed) ──
+resume/*.pdf
+resume/*.txt
+
+# ── NER model (large binary, train locally) ──────────────────
+model/linkedin_ner/
+
+# ── Node / frontend ──────────────────────────────────────────
+node_modules/
+dashboard/frontend/node_modules/
+dist/
+.cache/
+
+# ── Claude Code internal ─────────────────────────────────────
+.claude/
+
+# ── OS / IDE ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Job Hunter Agent</title>
+    <script>
+      // Apply theme before first paint to avoid flash. Persisted by the toggle in Layout.jsx.
+      (function () {
+        var t = localStorage.getItem('jh-theme')
+        if (!t) t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+        if (t === 'dark') document.documentElement.classList.add('dark')
+      })()
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script id="tailwind-config">
+    // Semantic tokens only — actual colors live in the CSS variables below,
+    // so every component is automatically light/dark aware.
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            bg:        "rgb(var(--bg) / <alpha-value>)",
+            surface:   "rgb(var(--surface) / <alpha-value>)",
+            "surface-2": "rgb(var(--surface-2) / <alpha-value>)",
+            "surface-3": "rgb(var(--surface-3) / <alpha-value>)",
+            line:      "rgb(var(--line) / <alpha-value>)",
+            ink:       "rgb(var(--ink) / <alpha-value>)",
+            muted:     "rgb(var(--muted) / <alpha-value>)",
+            faint:     "rgb(var(--faint) / <alpha-value>)",
+            accent:    "rgb(var(--accent) / <alpha-value>)",
+            "accent-ink": "rgb(var(--accent-ink) / <alpha-value>)",
+            success:   "rgb(var(--success) / <alpha-value>)",
+            warning:   "rgb(var(--warning) / <alpha-value>)",
+            danger:    "rgb(var(--danger) / <alpha-value>)",
+            info:      "rgb(var(--info) / <alpha-value>)"
+          },
+          fontFamily: {
+            sans: ["Inter", "system-ui", "sans-serif"],
+            mono: ["JetBrains Mono", "monospace"]
+          },
+          borderRadius: { xl: "0.75rem", "2xl": "1rem" }
+        }
+      }
+    }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+    <style>
+      :root {
+        --bg: 244 246 251;
+        --surface: 255 255 255;
+        --surface-2: 241 245 249;
+        --surface-3: 226 232 240;
+        --line: 226 232 240;
+        --ink: 15 23 42;
+        --muted: 100 116 139;
+        --faint: 148 163 184;
+        --accent: 79 70 229;
+        --accent-ink: 255 255 255;
+        --success: 22 163 74;
+        --warning: 217 119 6;
+        --danger: 220 38 38;
+        --info: 2 132 199;
+        --chart-1: 99 102 241;
+        --chart-2: 34 197 94;
+        --chart-3: 245 158 11;
+        --chart-4: 14 165 233;
+        --chart-5: 236 72 153;
+        --chart-6: 148 163 184;
+        --shadow: 0 1px 3px rgb(15 23 42 / 0.06), 0 4px 16px rgb(15 23 42 / 0.05);
+      }
+      .dark {
+        --bg: 8 13 26;
+        --surface: 15 23 41;
+        --surface-2: 23 33 56;
+        --surface-3: 35 47 75;
+        --line: 34 45 70;
+        --ink: 226 232 240;
+        --muted: 148 163 184;
+        --faint: 100 116 139;
+        --accent: 129 140 248;
+        --accent-ink: 17 24 39;
+        --success: 74 222 128;
+        --warning: 251 191 36;
+        --danger: 248 113 113;
+        --info: 56 189 248;
+        --chart-1: 129 140 248;
+        --chart-2: 74 222 128;
+        --chart-3: 251 191 36;
+        --chart-4: 56 189 248;
+        --chart-5: 244 114 182;
+        --chart-6: 100 116 139;
+        --shadow: 0 1px 3px rgb(0 0 0 / 0.4), 0 4px 20px rgb(0 0 0 / 0.3);
+      }
+      .material-symbols-outlined { font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24; vertical-align:middle; }
+      html, body { background-color: rgb(var(--bg)); color: rgb(var(--ink)); font-family:'Inter',system-ui,sans-serif; }
+      body, .card, aside, header { transition: background-color .25s ease, border-color .25s ease; }
+      .card { background: rgb(var(--surface)); border: 1px solid rgb(var(--line)); box-shadow: var(--shadow); }
+      .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background: rgb(var(--surface-3)); border-radius: 10px; }
+      #root { width: 100%; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

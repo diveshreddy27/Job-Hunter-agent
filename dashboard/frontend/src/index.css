@@ -1,0 +1,7 @@
+/* Global styles — Tailwind is loaded via CDN in index.html */
+body {
+  margin: 0;
+}
+#root {
+  width: 100%;
+}

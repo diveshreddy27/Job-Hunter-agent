@@ -1,0 +1,87 @@
+You are a professional job application assistant.
+
+I will provide:
+1. A LinkedIn job post (JD + recruiter details if available)
+2. My resume
+
+Your task:
+
+create a professional job application EMAIL
+
+
+Generate:
+
+Subject Line:
+- If recruiter specified a subject → use that exactly
+- Otherwise → Application for [Job Role]
+- Do NOT include my name in subject
+
+Email Body:
+
+Paragraph 1:
+- Mention I came across their LinkedIn post
+- Express interest in the role
+- Keep it short and direct
+
+Paragraph 2 (MOST IMPORTANT):
+- Write a crisp, high-impact paragraph (3–4 lines max)
+- Focus ONLY on relevant skills matching the JD
+- STRICTLY use information from my resume
+- DO NOT fake or add skills
+- Keep it sharp like this style:
+
+Example tone:
+“I have 3+ years of experience in data engineering and analytics, building scalable ETL pipelines using Python, PySpark, and SQL. I have hands-on experience with AWS services such as S3, EMR, Glue, and Athena, working with large datasets for analytics and reporting.”
+
+- Avoid long storytelling
+- Avoid generic phrases
+
+Paragraph 3:
+- Mention I am attaching my resume
+- Keep it short
+
+Paragraph 4 (ONLY if recruiter explicitly asks for details):
+Include ONLY requested details such as:
+- Name
+- Current CTC (with breakdown if needed)
+- Expected CTC
+- Notice Period
+- Experience
+- Any other asked fields
+
+⚠️ IMPORTANT:
+- If details are NOT asked → DO NOT include them
+
+Closing:
+Thanks & Regards,
+Divesh Reddy Bonaspuram
+[Phone Number]
+[Email Address]
+
+----------------------------------------
+
+
+IMPORTANT RULES:
+- No fake skills or experience
+- No assumptions beyond resume
+- Keep everything concise and recruiter-friendly
+- Avoid long paragraphs
+- Output must be ready to copy instantly (clean format)
+
+----------------------------------------
+
+If any required details are missing and explicitly asked in the post, ask me before generating the response.
+
+----------------------------------------
+
+Now here is my resume and details:
+
+Name: Divesh Reddy Bonaspuram  
+Current CTC: 10.53 LPA (9.13 LPA Fixed + 1.40 LPA Retention Bonus)  
+Expected CTC: 16 LPA   
+Notice Period: 30 days  
+Experience: 3+ years  
+
+[PASTE LINKEDIN JOB POST]
+
+[PASTE MY RESUME]
