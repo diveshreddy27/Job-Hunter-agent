@@ -42,9 +42,13 @@ def _ingest(raw: dict, norm: dict) -> bool:
         profile_url=raw.get("profile_url"),
         days_filter=raw.get("days_filter", 1),
         scraped_at=raw.get("scraped_at"),
+        posted_at=raw.get("posted_at"),
     )
     if raw_id is None:
-        return False  # duplicate URN (race condition / re-run)
+        # Duplicate URN — skip re-extraction but backfill posted_at if we have it
+        # and the existing row doesn't yet (handles first run after posted_at was added).
+        db.backfill_posted_at(raw["activity_urn"], raw.get("posted_at"))
+        return False
     db.insert_normalized_post(raw_id, norm)
     return True
 

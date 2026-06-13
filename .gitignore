@@ -16,6 +16,7 @@ data/
 
 # ── Personal / private config (example files ARE committed) ──
 config/candidate_profile.py
+config/candidate_info.txt
 config/linkedin_cookies.json
 
 # ── Resume (personal document — example README is committed) ──

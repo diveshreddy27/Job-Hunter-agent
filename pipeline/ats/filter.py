@@ -16,6 +16,7 @@ Run standalone:
     python ats/filter.py
 """
 import logging
+import re
 import sys
 import pathlib
 
@@ -26,6 +27,58 @@ from pipeline.scraper.location_utils import is_contract_role
 import settings as cfg
 
 log = logging.getLogger("ats.filter")
+
+# Cloud platform keyword sets (lowercased)
+_AWS_KEYWORDS = {
+    "aws", "amazon web services", "s3", "ec2", "lambda", "glue", "redshift",
+    "emr", "kinesis", "dynamodb", "athena", "eks", "ecs", "sagemaker",
+    "cloudwatch", "cloudformation", "step functions", "aws glue", "aws lambda",
+}
+_GCP_KEYWORDS = {
+    "gcp", "google cloud", "bigquery", "dataflow", "pub/sub", "pubsub",
+    "cloud storage", "looker", "gke", "vertex ai", "cloud run", "dataproc",
+    "google bigquery",
+}
+_AZURE_KEYWORDS = {
+    "azure", "microsoft azure", "adls", "azure data factory", "adf",
+    "azure synapse", "synapse", "cosmos db", "azure databricks",
+    "azure blob", "azure devops", "azure functions",
+}
+
+
+def detect_clouds(text: str, skills: str = "") -> tuple:
+    """
+    Scan post content + skills CSV for cloud platform mentions.
+    Returns (clouds_required, cloud_fit).
+      clouds_required : comma-sep string of detected platforms, e.g. "aws,gcp"
+      cloud_fit       : "aws_match"       — AWS mentioned (candidate matches)
+                        "no_cloud_req"    — no cloud mentioned (safe, no conflict)
+                        "other_cloud_only"— only non-AWS cloud(s) (potential mismatch)
+
+    Hashtags (#aws, #azure …) are stripped from post text before matching —
+    recruiters add them for LinkedIn reach, not as job requirements.
+    The Gemini-extracted skills CSV is trusted as-is.
+    """
+    clean_text = re.sub(r'#\w+', ' ', text or '')
+    haystack = (clean_text + " " + (skills or "")).lower()
+    found = set()
+    if any(k in haystack for k in _AWS_KEYWORDS):
+        found.add("aws")
+    if any(k in haystack for k in _GCP_KEYWORDS):
+        found.add("gcp")
+    if any(k in haystack for k in _AZURE_KEYWORDS):
+        found.add("azure")
+
+    clouds_required = ",".join(sorted(found))
+
+    if not found:
+        cloud_fit = "no_cloud_req"
+    elif "aws" in found:
+        cloud_fit = "aws_match"
+    else:
+        cloud_fit = "other_cloud_only"
+
+    return clouds_required, cloud_fit
 
 
 def _location_ok(city: str, state: str, is_remote: int) -> bool:
@@ -60,7 +113,7 @@ def run_filter() -> tuple[int, int]:
             SELECT n.id AS norm_id, n.raw_post_id,
                    n.location_city, n.location_state, n.is_remote,
                    n.experience_min, n.experience_max,
-                   n.title, n.company,
+                   n.title, n.company, n.skills,
                    n.role_type, n.recruiter_email,
                    r.post_content
             FROM normalized_posts n
@@ -86,7 +139,8 @@ def run_filter() -> tuple[int, int]:
             reasons.append("no recruiter email")
 
         if not reasons:
-            db.insert_target_job(r["norm_id"], r["raw_post_id"])
+            clouds_req, cloud_fit = detect_clouds(r["post_content"] or "", r["skills"] or "")
+            db.insert_target_job(r["norm_id"], r["raw_post_id"], clouds_req, cloud_fit)
             added += 1
             log.info("[filter] PASS  norm_id=%-3d  %s @ %s",
                      r["norm_id"], r["title"] or "?", r["company"] or "?")

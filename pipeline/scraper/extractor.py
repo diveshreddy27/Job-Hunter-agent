@@ -69,7 +69,9 @@ JSON schema:
   "recruiter_designation":    "recruiter's own title from headline",
   "recruiter_current_company":"recruiter's OWN employer from headline",
   "apply_via":                "email" | "linkedin_easy" | "website" | "personal_message",
-  "apply_url":                "application link/URL found in post, or null"
+  "apply_url":                "application link/URL found in post, or null",
+  "email_subject_format":     "exact subject line format recruiter specified (e.g. 'Name | Role | Exp | CTC | NP'), or null",
+  "email_required_fields":    "comma-separated list of fields recruiter explicitly asks for in the email, using ONLY these tokens: current_ctc, expected_ctc, notice_period, current_location, preferred_locations, experience, current_company, current_designation, open_to_relocation, pan_number, linkedin_url, github_url, availability, work_mode_preference, resume_link — or null if none asked"
 }}
 
 Rules:
@@ -83,7 +85,9 @@ Rules:
     4. "personal_message" — ONLY if post says DM / message me / inbox me / WhatsApp me and NONE of the above apply
     5. "website"          — default fallback
 - apply_url: extract the actual URL from the post when apply_via is "website"; null otherwise
-- experience: if post says "5+ years" return min=5, max=8; if "3-6 years" return min=3, max=6\
+- experience: if post says "5+ years" return min=5, max=8; if "3-6 years" return min=3, max=6
+- email_subject_format: copy the EXACT format string from the post if recruiter wrote "Subject:", "Sub:", "Mail subject:" etc. (e.g. "Name | Role | Exp | Current CTC | Expected CTC | NP | Location"). null if not specified
+- email_required_fields: look for phrases like "share your CTC", "mention notice period", "send CTC/NP/location", "include your details" etc. Map each mentioned item to the closest token from the allowed list. null if recruiter asks for nothing specific\
 """
 
 

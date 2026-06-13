@@ -1,11 +1,13 @@
 """
-Email builder — fills EMAIL_BUILDER_PROMPT with job data + resume,
-calls AI model cascade, returns {subject, body}.
+Email builder — sends info file + resume + raw post to AI cascade.
+AI handles greeting, subject format, required fields, and flags anything
+missing from the info file.
 """
 import json
 import logging
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -15,9 +17,11 @@ import settings as cfg
 
 log = logging.getLogger("email_builder")
 
-_PROJECT_ROOT = Path(__file__).parent.parent.parent
-_PROMPT_PATH  = _PROJECT_ROOT / "prompts" / "email_builder_prompt.txt"
-_RESUME_DIR   = _PROJECT_ROOT / "resume"
+_PROJECT_ROOT   = Path(__file__).parent.parent.parent
+_PROMPT_PATH    = _PROJECT_ROOT / "prompts" / "email_builder_prompt.txt"
+_RESUME_DIR     = _PROJECT_ROOT / "resume"
+_INFO_PATH      = _PROJECT_ROOT / "config" / "candidate_info.txt"
+_MISSING_PATH   = _PROJECT_ROOT / "data" / "missing_fields.json"
 
 _GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models"
@@ -25,28 +29,33 @@ _GEMINI_URL = (
 )
 _GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# Model cascade for email generation — best quality first
 _MODELS = [
-    {"id": "gemini-3.5-flash",      "api": "gemini"},
-    {"id": "gemini-2.5-flash",      "api": "gemini"},
-    {"id": "llama-3.3-70b-versatile","api": "groq"},
-    {"id": "gemini-3.1-flash-lite", "api": "gemini"},
-    {"id": "gemini-2.5-flash-lite", "api": "gemini"},
-    {"id": "gemma-4-31b-it",        "api": "gemini"},
+    {"id": "gemini-3.5-flash",        "api": "gemini"},
+    {"id": "gemini-2.5-flash",        "api": "gemini"},
+    {"id": "llama-3.3-70b-versatile", "api": "groq"},
+    {"id": "gemini-3.1-flash-lite",   "api": "gemini"},
+    {"id": "gemini-2.5-flash-lite",   "api": "gemini"},
+    {"id": "gemma-4-31b-it",          "api": "gemini"},
 ]
 
-# Cached resume text
 _resume_cache = None  # type: str
 
 
-def _extract_resume_text() -> str:
+def _read_info() -> str:
+    if not _INFO_PATH.exists():
+        raise FileNotFoundError(
+            f"Candidate info file not found: {_INFO_PATH}\n"
+            "Copy config/candidate_info.example.txt → config/candidate_info.txt and fill it in."
+        )
+    return _INFO_PATH.read_text(encoding="utf-8").strip()
+
+
+def _read_resume() -> str:
     global _resume_cache
     if _resume_cache:
         return _resume_cache
-
     pdf_files = list(_RESUME_DIR.glob("*.pdf"))
     txt_files = list(_RESUME_DIR.glob("*.txt"))
-
     if pdf_files:
         from pdfminer.high_level import extract_text
         text = extract_text(str(pdf_files[0]))
@@ -54,70 +63,51 @@ def _extract_resume_text() -> str:
         text = txt_files[0].read_text(encoding="utf-8", errors="ignore")
     else:
         raise FileNotFoundError(f"No resume found in {_RESUME_DIR}")
-
     _resume_cache = text.strip()
     return _resume_cache
 
 
-def _format_experience(job: dict) -> str:
-    mn, mx = job.get("experience_min"), job.get("experience_max")
-    if mn is not None and mx is not None:
-        return f"{mn}–{mx} years"
-    if mn is not None:
-        return f"{mn}+ years"
-    if mx is not None:
-        return f"Up to {mx} years"
-    return "Not specified"
-
-
 def _build_prompt(job: dict) -> str:
     template = _PROMPT_PATH.read_text(encoding="utf-8")
-
-    location = ", ".join(filter(None, [
-        job.get("location_city"), job.get("location_state")
-    ])) or job.get("location") or "Not specified"
-
-    job_section = (
-        f"Role: {job.get('title') or 'Not specified'}\n"
-        f"Company: {job.get('company') or 'Not specified'}\n"
-        f"Location: {location}\n"
-        f"Work Mode: {job.get('work_mode') or 'Not specified'}\n"
-        f"Experience Required: {_format_experience(job)}\n"
-        f"Required Skills: {job.get('skills') or 'Not specified'}\n\n"
-        f"Full Post:\n{job.get('post_content') or ''}"
-    )
-
-    resume_text = _extract_resume_text()
-
-    # Replace contact-info placeholders with actual values
-    sender_email = getattr(cfg, "SENDER_EMAIL", "diveshreddy2427@gmail.com")
-    sender_phone = getattr(cfg, "SENDER_PHONE", "")
-    template = template.replace("[Email Address]", sender_email)
-    template = template.replace("[Phone Number]", sender_phone)
-
-    # Replace job post and resume placeholders
-    template = template.replace("[PASTE LINKEDIN JOB POST]", job_section)
-    template = template.replace("[PASTE MY RESUME]", resume_text)
-
-    # Append JSON output instruction
-    template += (
-        "\n\n---\n"
-        "IMPORTANT — OUTPUT FORMAT:\n"
-        "Return ONLY a valid JSON object with exactly two keys, nothing else:\n"
-        '{"subject": "<email subject line>", "body": "<full email body — use \\n for line breaks>"}'
-    )
+    template = template.replace("[MY_INFO]",   _read_info())
+    template = template.replace("[MY_RESUME]", _read_resume())
+    template = template.replace("[RAW_POST]",  job.get("post_content") or "")
     return template
 
 
+def _record_missing_fields(fields: list, job_id) -> None:
+    """Append newly seen missing fields to data/missing_fields.json."""
+    if not fields:
+        return
+    _MISSING_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        existing = json.loads(_MISSING_PATH.read_text()) if _MISSING_PATH.exists() else {}
+    except (json.JSONDecodeError, OSError):
+        existing = {}
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for field in fields:
+        field = field.strip().upper()
+        if not field:
+            continue
+        if field not in existing:
+            existing[field] = {"count": 0, "first_seen": today, "last_seen": today, "job_ids": []}
+        entry = existing[field]
+        entry["count"] += 1
+        entry["last_seen"] = today
+        if job_id and job_id not in entry["job_ids"]:
+            entry["job_ids"].append(job_id)
+
+    _MISSING_PATH.write_text(json.dumps(existing, indent=2))
+    log.info("[email_builder] Missing fields recorded: %s", fields)
+
+
 def _parse_response(text: str) -> dict:
-    """Extract JSON from model response — handles wrapped/prefixed output."""
     text = text.strip()
-    # Try direct parse
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    # Extract first {...} block
     m = re.search(r'\{.*\}', text, re.DOTALL)
     if m:
         try:
@@ -160,30 +150,39 @@ def _call_groq(model_id: str, prompt: str) -> dict:
 
 
 def build_email(job: dict) -> dict:
-    """Generate email subject + body for the given job dict.
+    """Generate email for a job dict.
 
-    Returns: {"subject": str, "body": str}
-    Raises:  RuntimeError if all models fail.
+    Returns: {subject, body, model_used, missing_fields}
+    missing_fields: list of field names from candidate_info.txt that the
+                    recruiter asked for but were marked '(not provided)'.
     """
     prompt = _build_prompt(job)
 
     last_error = None
     for m in _MODELS:
         try:
-            if m["api"] == "gemini":
-                result = _call_gemini(m["id"], prompt)
-            else:
-                result = _call_groq(m["id"], prompt)
+            result = _call_gemini(m["id"], prompt) if m["api"] == "gemini" \
+                     else _call_groq(m["id"], prompt)
 
             if not result.get("subject") or not result.get("body"):
                 raise ValueError("Response missing subject or body")
 
-            log.info("[email_builder] Generated via %s for job=%s", m["id"], job.get("target_id"))
-            return {"subject": result["subject"], "body": result["body"], "model_used": m["id"]}
+            missing = [f for f in (result.get("missing_fields") or []) if f]
+            _record_missing_fields(missing, job.get("target_id"))
+
+            log.info("[email_builder] Generated via %s  job=%s  missing=%s",
+                     m["id"], job.get("target_id"), missing or "none")
+
+            return {
+                "subject":        result["subject"],
+                "body":           result["body"],
+                "model_used":     m["id"],
+                "missing_fields": missing,
+            }
 
         except Exception as e:
             log.warning("[email_builder] %s failed: %s", m["id"], e)
             last_error = e
             continue
 
-    raise RuntimeError(f"All models failed to generate email. Last error: {last_error}")
+    raise RuntimeError(f"All models failed. Last error: {last_error}")

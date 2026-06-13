@@ -37,7 +37,7 @@ from db import database as db
 
 log = logging.getLogger("scraper.linkedin")
 
-COOKIE_FILE = pathlib.Path(__file__).parent.parent / "config" / "linkedin_cookies.json"
+COOKIE_FILE = pathlib.Path(__file__).parent.parent.parent / "config" / "linkedin_cookies.json"
 
 
 def _is_wsl() -> bool:
@@ -695,6 +695,24 @@ def _scrape_posts(
                     if recruiter_li and "?" in recruiter_li:
                         recruiter_li = recruiter_li.split("?")[0]
 
+                    # 3b. Post age — LinkedIn shows "X hours/days ago" in the
+                    #     actor sub-description. Convert to absolute posted_at so
+                    #     we can filter by actual post time, not scrape time.
+                    from datetime import timedelta
+                    posted_at = None
+                    time_el = card.query_selector(
+                        "span.update-components-actor__sub-description, "
+                        "span[class*='actor__sub-description'], "
+                        ".feed-shared-actor__sub-description, "
+                        "a[class*='actor__sub-description-link'] span"
+                    )
+                    if time_el:
+                        time_text = time_el.inner_text().strip()
+                        hours_ago = parse_posted_hours(time_text)
+                        if hours_ago is not None:
+                            scrape_now = datetime.now(timezone.utc)
+                            posted_at = (scrape_now - timedelta(hours=hours_ago)).isoformat()
+
                     # 4. Post content — skip only if truly empty
                     content_el = card.query_selector(
                         ".update-components-text, "
@@ -719,6 +737,7 @@ def _scrape_posts(
                         "profile_url":     recruiter_li,
                         "days_filter":     days,
                         "scraped_at":      datetime.now(timezone.utc).isoformat(),
+                        "posted_at":       posted_at,
                     })
                     staged += 1
                     round_staged += 1

@@ -1,0 +1,61 @@
+# ── Identity ─────────────────────────────────────────────────
+FULL_NAME: Arjun Sharma
+EMAIL: arjun.sharma@gmail.com
+PHONE: +91 98765 43210
+DATE_OF_BIRTH: 15-Aug-1999
+GENDER: Male
+LANGUAGES_KNOWN: English, Hindi, Telugu
+
+# ── Location ─────────────────────────────────────────────────
+CURRENT_LOCATION: Hyderabad
+PREFERRED_LOCATIONS: Hyderabad, Pune, Bangalore, Remote
+OPEN_TO_RELOCATION: Yes
+
+# ── Experience ───────────────────────────────────────────────
+TOTAL_EXPERIENCE: 3+ Years
+RELEVANT_EXPERIENCE: 3+ Years (Data Engineering)
+CURRENT_COMPANY: Acme Corp
+CURRENT_DESIGNATION: Software Engineer
+
+# ── Compensation ─────────────────────────────────────────────
+CURRENT_CTC: 12 LPA
+CURRENT_CTC_BREAKUP: 10 LPA Fixed + 2 LPA Variable
+EXPECTED_CTC: 18 LPA
+OFFER_IN_HAND: (not provided)
+
+# ── Availability ─────────────────────────────────────────────
+NOTICE_PERIOD: 30 days
+SERVING_NOTICE: No
+NOTICE_BUYOUT: No
+LAST_WORKING_DAY: (not provided)
+IMMEDIATE_JOINER: (not provided)
+INTERVIEW_AVAILABILITY: Weekdays after 6 PM, weekends anytime
+
+# ── Work Preferences ─────────────────────────────────────────
+PREFERRED_WORK_MODE: Hybrid / Remote
+OPEN_TO_CONTRACT: No
+OPEN_TO_BOND: (not provided)
+
+# ── Profiles & Links ─────────────────────────────────────────
+LINKEDIN_URL: https://linkedin.com/in/arjun-sharma
+GITHUB_URL: https://github.com/arjunsharma
+PORTFOLIO_URL: (not provided)
+
+# ── Certifications ───────────────────────────────────────────
+CERTIFICATIONS: AWS Certified Data Engineer – Associate
+
+# ── Education ────────────────────────────────────────────────
+HIGHEST_QUALIFICATION: B.Tech in Computer Science
+COLLEGE: JNTU Hyderabad
+GRADUATION_YEAR: 2021
+
+# ── Government IDs ───────────────────────────────────────────
+PAN_NUMBER: ABCDE1234F
+
+# ── References ───────────────────────────────────────────────
+REFERENCE_NAME: (not provided)
+REFERENCE_CONTACT: (not provided)
+
+# ── Visa / Work Authorization ─────────────────────────────────
+WORK_AUTHORIZATION: Indian Citizen
+VISA_STATUS: (not provided)

@@ -46,6 +46,24 @@ def init_db() -> None:
                 "ON normalized_posts(is_trained)"
             )
 
+        norm_v2 = {row[1] for row in conn.execute("PRAGMA table_info(normalized_posts)")}
+        if "email_subject_format" not in norm_v2:
+            conn.execute("ALTER TABLE normalized_posts ADD COLUMN email_subject_format TEXT")
+        if "email_required_fields" not in norm_v2:
+            conn.execute("ALTER TABLE normalized_posts ADD COLUMN email_required_fields TEXT")
+
+        rp_existing = {row[1] for row in conn.execute("PRAGMA table_info(raw_posts)")}
+        if "posted_at" not in rp_existing:
+            conn.execute("ALTER TABLE raw_posts ADD COLUMN posted_at TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_rp_posted_at ON raw_posts(posted_at)")
+
+        tj_existing = {row[1] for row in conn.execute("PRAGMA table_info(target_jobs)")}
+        if "clouds_required" not in tj_existing:
+            conn.execute("ALTER TABLE target_jobs ADD COLUMN clouds_required TEXT NOT NULL DEFAULT ''")
+        if "cloud_fit" not in tj_existing:
+            conn.execute("ALTER TABLE target_jobs ADD COLUMN cloud_fit TEXT NOT NULL DEFAULT ''")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tj_cloud_fit ON target_jobs(cloud_fit)")
+
         ats_existing = {row[1] for row in conn.execute("PRAGMA table_info(ats_scores)")}
         if "tailored_resume_path" not in ats_existing:
             conn.execute("ALTER TABLE ats_scores ADD COLUMN tailored_resume_path TEXT")
@@ -169,6 +187,7 @@ def insert_raw_post(
     profile_url:     Optional[str] = None,
     days_filter:     int = 1,
     scraped_at:      Optional[str] = None,
+    posted_at:       Optional[str] = None,
 ) -> Optional[int]:
     """Insert one raw_posts row. Returns the new id, or None when the URN
     already exists (cross-run dedup)."""
@@ -178,15 +197,28 @@ def insert_raw_post(
                 """INSERT INTO raw_posts (
                     activity_urn, post_url, post_content,
                     post_author, author_headline, profile_url,
-                    days_filter, scraped_at
-                ) VALUES (?,?,?,?,?,?,?,?)""",
+                    days_filter, scraped_at, posted_at
+                ) VALUES (?,?,?,?,?,?,?,?,?)""",
                 (activity_urn, post_url, post_content,
                  post_author or "", author_headline or "",
-                 profile_url or "", days_filter, scraped_at or now_iso()),
+                 profile_url or "", days_filter,
+                 scraped_at or now_iso(), posted_at),
             )
             return cur.lastrowid
         except sqlite3.IntegrityError:
             return None  # duplicate URN
+
+
+def backfill_posted_at(activity_urn: str, posted_at: str) -> None:
+    """Set posted_at on an existing row only when it is currently NULL.
+    Safe to call on every duplicate — no-op if already populated."""
+    if not posted_at:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE raw_posts SET posted_at = ? WHERE activity_urn = ? AND posted_at IS NULL",
+            (posted_at, activity_urn),
+        )
 
 
 def get_pending_raw_posts(limit: int = 5) -> list:
@@ -215,6 +247,8 @@ _NORM_COLS = (
     "recruiter_designation", "recruiter_current_company",
     "apply_via", "apply_url",
     "skills",
+    "email_subject_format",
+    "email_required_fields",
     "extracted_by",
 )
 
@@ -257,6 +291,7 @@ def get_untrained_normalized_posts() -> list:
     with get_conn() as conn:
         return conn.execute("""
             SELECT n.id, n.title, n.company, n.skills,
+                   n.email_subject_format, n.email_required_fields,
                    r.post_author, r.author_headline, r.post_content
             FROM normalized_posts n
             JOIN raw_posts r ON r.id = n.raw_post_id
@@ -283,13 +318,15 @@ def mark_posts_trained(norm_post_ids: list) -> None:
 
 # ── target_jobs ──────────────────────────────────────────────
 
-def insert_target_job(norm_post_id: int, raw_post_id: int) -> Optional[int]:
+def insert_target_job(norm_post_id: int, raw_post_id: int,
+                      clouds_required: str = "", cloud_fit: str = "") -> Optional[int]:
     """Insert into target_jobs. Returns new id or None if already exists."""
     with get_conn() as conn:
         try:
             cur = conn.execute(
-                "INSERT INTO target_jobs (norm_post_id, raw_post_id, filtered_at) VALUES (?,?,?)",
-                (norm_post_id, raw_post_id, now_iso()),
+                "INSERT INTO target_jobs (norm_post_id, raw_post_id, filtered_at, "
+                "clouds_required, cloud_fit) VALUES (?,?,?,?,?)",
+                (norm_post_id, raw_post_id, now_iso(), clouds_required, cloud_fit),
             )
             return cur.lastrowid
         except sqlite3.IntegrityError:

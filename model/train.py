@@ -18,7 +18,7 @@ Legacy fallback: staging/training/training_data.jsonl
   they are re-read on every run until manually migrated or the model has
   seen enough DB-sourced data to make them irrelevant.
 
-The model learns: JOB_TITLE, COMPANY, SKILL.
+The model learns: JOB_TITLE, COMPANY, SKILL, SUBJECT_FORMAT.
 Regex utils (email, experience, location, work_mode) are already accurate
 and don't need NER.
 
@@ -88,6 +88,10 @@ def _to_spacy_example(text: str, norm: dict):
         if span:
             entities.append((*span, "SKILL"))
 
+    span = _find_span(text, norm.get("email_subject_format"))
+    if span:
+        entities.append((*span, "SUBJECT_FORMAT"))
+
     if not entities:
         return None
     return (text, {"entities": _remove_overlaps(entities)})
@@ -115,6 +119,7 @@ def load_training_data(retrain_all: bool = False) -> tuple[list, list]:
         with db.get_conn() as conn:
             rows = conn.execute(f"""
                 SELECT n.id, n.title, n.company, n.skills,
+                       n.email_subject_format, n.email_required_fields,
                        r.post_author, r.author_headline, r.post_content,
                        r.activity_urn
                 FROM normalized_posts n
@@ -204,7 +209,7 @@ def train(n_iters: int = 30, min_examples: int = 10, retrain_all: bool = False) 
 
     nlp = spacy.blank("en")
     ner = nlp.add_pipe("ner")
-    for label in ("JOB_TITLE", "COMPANY", "SKILL"):
+    for label in ("JOB_TITLE", "COMPANY", "SKILL", "SUBJECT_FORMAT"):
         ner.add_label(label)
 
     examples = []

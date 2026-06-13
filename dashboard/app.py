@@ -186,6 +186,7 @@ def api_jobs():
     conn = get_db()
     query = """
         SELECT t.id AS target_id,
+               t.clouds_required, t.cloud_fit,
                n.title, n.company, n.location_city, n.location_state,
                n.work_mode, n.is_remote, n.experience_min, n.experience_max,
                n.recruiter_email, n.recruiter_name, n.apply_url,
@@ -241,6 +242,7 @@ def api_job_detail(target_id):
     conn = get_db()
     row = conn.execute("""
         SELECT t.id AS target_id,
+               t.clouds_required, t.cloud_fit,
                n.*, r.post_content, r.post_url, r.post_author, r.scraped_at,
                s.*,
                k.status AS tracker_status, k.notes AS tracker_notes
@@ -623,6 +625,7 @@ def api_generate_email(target_id):
                n.work_mode, n.experience_min, n.experience_max,
                n.skills, n.recruiter_email, n.recruiter_name,
                n.recruiter_designation, n.recruiter_current_company,
+               n.email_subject_format, n.email_required_fields,
                r.post_content
         FROM target_jobs t
         JOIN normalized_posts n ON n.id = t.norm_post_id
@@ -643,10 +646,11 @@ def api_generate_email(target_id):
         from pipeline.outreach.builder import build_email
         result = build_email(job)
         return jsonify({
-            "subject":    result["subject"],
-            "body":       result["body"],
-            "to_email":   job["recruiter_email"],
-            "model_used": result.get("model_used"),
+            "subject":        result["subject"],
+            "body":           result["body"],
+            "to_email":       job["recruiter_email"],
+            "model_used":     result.get("model_used"),
+            "missing_fields": result.get("missing_fields", []),
         })
     except Exception as e:
         app.logger.error("Email generation failed for job %d: %s", target_id, e)
@@ -700,6 +704,20 @@ def api_send_email(target_id):
         conn.commit()
         conn.close()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/missing-fields")
+def api_missing_fields():
+    """Return accumulated missing fields from candidate_info.txt across all email generations."""
+    missing_path = Path(__file__).parent.parent / "data" / "missing_fields.json"
+    if not missing_path.exists():
+        return jsonify({"fields": {}, "total_unique": 0})
+    try:
+        data = json.loads(missing_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return jsonify({"fields": {}, "total_unique": 0})
+    sorted_fields = dict(sorted(data.items(), key=lambda x: x[1]["count"], reverse=True))
+    return jsonify({"fields": sorted_fields, "total_unique": len(sorted_fields)})
 
 
 if __name__ == "__main__":
