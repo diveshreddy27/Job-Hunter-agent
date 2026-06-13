@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { DonutChart, AreaChart, scoreColor, GrowBar } from '../components/charts'
-import { PageHeader, Card, StatCard, ScoreChip, ModePill, Loading, EmptyState } from '../components/ui'
+import { PageHeader, Card, StatCard, ScoreChip, ModePill, EmptyState, Skeleton, StatCardSkeleton } from '../components/ui'
 
 const BAND_COLORS = {
   '80-100': 'rgb(var(--success))',
@@ -15,6 +15,18 @@ const MODE_COLORS = {
   onsite: 'rgb(var(--chart-4))',
   unknown: 'rgb(var(--chart-6))',
 }
+const CLOUD_FIT_COLORS = {
+  aws_match: 'rgb(var(--success))',
+  no_cloud_req: 'rgb(var(--chart-1))',
+  other_cloud_only: 'rgb(var(--warning))',
+  unknown: 'rgb(var(--chart-6))',
+}
+const CLOUD_FIT_LABEL = {
+  aws_match: 'AWS match',
+  no_cloud_req: 'No cloud req',
+  other_cloud_only: 'Other cloud',
+  unknown: 'unknown',
+}
 
 export default function Overview() {
   const [stats, setStats] = useState(null)
@@ -27,7 +39,7 @@ export default function Overview() {
     ]).then(([s, j]) => { setStats(s); setJobs(j) })
   }, [])
 
-  if (!stats) return <Loading />
+  if (!stats) return <OverviewSkeleton />
 
   const funnel = [
     { label: 'Scraped',   value: stats.raw_total,  icon: 'hub',              hint: 'posts survived pre-filters' },
@@ -50,6 +62,10 @@ export default function Overview() {
     { label: 'failed',  value: (stats.by_status || {}).failed || 0,  color: 'rgb(var(--danger))' },
   ].filter(d => d.value > 0)
 
+  const cloudData = Object.entries(stats.cloud_fit || {})
+    .map(([fit, value]) => ({ label: CLOUD_FIT_LABEL[fit] || fit, value, color: CLOUD_FIT_COLORS[fit] || CLOUD_FIT_COLORS.unknown }))
+    .sort((a, b) => b.value - a.value)
+
   const trend = (stats.by_date || []).map(d => ({ x: d.date.slice(5), y: d.cnt }))
   const top5 = jobs.slice(0, 5)
 
@@ -59,30 +75,34 @@ export default function Overview() {
         title="Overview"
         subtitle={`Pipeline intelligence across ${stats.raw_total} scraped posts. Last run ${stats.last_run}.`}
       >
-        <span className="inline-flex items-center gap-2 px-3 py-1.5 card rounded-full text-xs font-semibold text-success">
-          <span className="w-2 h-2 rounded-full bg-success animate-pulse" /> Agent Active
+        <span className="inline-flex items-center gap-2 px-3.5 py-1.5 card rounded-full text-xs font-semibold text-success">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full rounded-full bg-success opacity-60 animate-ping" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-success" />
+          </span>
+          Agent Active
         </span>
       </PageHeader>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6 fade-up fade-up-1">
         <StatCard icon="travel_explore" label="Posts Scraped" value={stats.raw_total} sub={`${(stats.by_status || {}).pending || 0} pending extraction`} tone="info" />
-        <StatCard icon="verified" label="Jobs Scored" value={stats.scored} sub={`of ${stats.targeted} targeted`} tone="accent" />
-        <StatCard icon="speed" label="Avg ATS Score" value={stats.avg_score ?? '—'} sub="across all scored jobs" tone="warning" />
+        <StatCard icon="verified" label="Jobs Scored" value={stats.scored} sub={`of ${stats.targeted} targeted · avg ${stats.avg_score ?? '—'}`} tone="accent" />
+        <StatCard icon="local_fire_department" label="Hot Leads" value={stats.hot_leads ?? 0} sub="fresh ≤48h · AWS · score ≥ 60" tone="warning" />
         <StatCard icon="workspace_premium" label="Elite Matches" value={stats.high_match_80} sub="score ≥ 80 — apply first" tone="success" />
       </div>
 
       {/* Funnel + score distribution */}
-      <div className="grid grid-cols-12 gap-5 mb-6">
+      <div className="grid grid-cols-12 gap-5 mb-6 fade-up fade-up-2">
         <Card className="col-span-12 xl:col-span-7" title="Pipeline Funnel" icon="filter_alt">
           <div className="grid grid-cols-4 gap-3">
             {funnel.map((st, i) => {
               const prev = i > 0 ? funnel[i - 1].value : null
               const conv = prev ? Math.round((st.value / prev) * 100) : null
               return (
-                <div key={st.label} className="relative text-center p-4 rounded-xl bg-surface-2">
-                  <span className="material-symbols-outlined text-accent text-[26px]">{st.icon}</span>
-                  <p className="text-3xl font-bold text-ink mt-2 leading-8">{st.value}</p>
+                <div key={st.label} className="relative text-center p-4 rounded-xl bg-surface-2/70 border border-line/60 hover:border-accent/40 transition-colors">
+                  <span className="material-symbols-outlined gradient-text text-[26px]">{st.icon}</span>
+                  <p className="text-3xl font-extrabold text-ink mt-2 leading-8 tracking-tight">{st.value}</p>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-muted mt-1">{st.label}</p>
                   <p className="text-[10px] text-faint mt-0.5 leading-3.5">{st.hint}</p>
                   {conv != null && (
@@ -107,21 +127,28 @@ export default function Overview() {
         </Card>
       </div>
 
-      {/* Activity trend + work mode */}
-      <div className="grid grid-cols-12 gap-5 mb-6">
-        <Card className="col-span-12 xl:col-span-7" title="Scrape Activity" icon="show_chart">
+      {/* Activity trend + work mode + cloud fit */}
+      <div className="grid grid-cols-12 gap-5 mb-6 fade-up fade-up-3">
+        <Card className="col-span-12 xl:col-span-6" title="Scrape Activity" icon="show_chart">
           <AreaChart data={trend} valueSuffix=" posts" />
         </Card>
 
-        <Card className="col-span-12 xl:col-span-5" title="Work Mode Split" icon="pie_chart">
+        <Card className="col-span-12 md:col-span-6 xl:col-span-3" title="Work Mode" icon="pie_chart">
           {modeData.length
-            ? <DonutChart data={modeData} centerLabel="extracted" centerValue={stats.normalized} />
+            ? <DonutChart data={modeData} size={140} thickness={18} centerLabel="extracted" centerValue={stats.normalized} />
             : <EmptyState icon="work_off" title="Nothing extracted yet" />}
+        </Card>
+
+        <Card className="col-span-12 md:col-span-6 xl:col-span-3" title="Cloud Fit" icon="cloud"
+          action={<Link to="/jobs?cloud_fit=aws_match" className="text-accent text-xs font-semibold hover:underline">AWS →</Link>}>
+          {cloudData.length
+            ? <DonutChart data={cloudData} size={140} thickness={18} centerLabel="targeted" centerValue={stats.targeted} />
+            : <EmptyState icon="cloud_off" title="No targeted jobs yet" />}
         </Card>
       </div>
 
       {/* Top jobs + extraction health */}
-      <div className="grid grid-cols-12 gap-5">
+      <div className="grid grid-cols-12 gap-5 fade-up fade-up-4">
         <Card className="col-span-12 xl:col-span-8" title="Top Scored Jobs" icon="trophy"
           action={<Link to="/jobs" className="text-accent text-xs font-semibold hover:underline">View all →</Link>}>
           {top5.length ? (
@@ -164,6 +191,49 @@ export default function Overview() {
             </div>
           </div>
         </Card>
+      </div>
+    </>
+  )
+}
+
+// Loading placeholder that mirrors the page's real grid so nothing shifts on load.
+function OverviewSkeleton() {
+  return (
+    <>
+      <div className="flex flex-wrap justify-between items-end gap-4 mb-7">
+        <div className="space-y-2.5">
+          <Skeleton className="h-7 w-44" />
+          <Skeleton className="h-3 w-72" />
+        </div>
+        <Skeleton className="h-8 w-28 rounded-full" />
+      </div>
+
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
+        {Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)}
+      </div>
+
+      <div className="grid grid-cols-12 gap-5 mb-6">
+        <div className="card rounded-2xl p-6 col-span-12 xl:col-span-7">
+          <Skeleton className="h-4 w-36 mb-5" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+        <div className="card rounded-2xl p-6 col-span-12 xl:col-span-5 flex flex-col items-center">
+          <Skeleton className="h-4 w-36 mb-6 self-start" />
+          <Skeleton className="h-36 w-36 rounded-full" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-12 gap-5">
+        <div className="card rounded-2xl p-6 col-span-12 xl:col-span-6">
+          <Skeleton className="h-4 w-32 mb-5" />
+          <Skeleton className="h-28 w-full" />
+        </div>
+        {[0, 1].map(i => (
+          <div key={i} className="card rounded-2xl p-6 col-span-12 md:col-span-6 xl:col-span-3 flex flex-col items-center">
+            <Skeleton className="h-4 w-24 mb-6 self-start" />
+            <Skeleton className="h-28 w-28 rounded-full" />
+          </div>
+        ))}
       </div>
     </>
   )

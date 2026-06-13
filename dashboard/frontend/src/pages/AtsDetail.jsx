@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ScoreRing, scoreColor, GrowBar } from '../components/charts'
-import { Card, TRACKER_META, EmptyState, Loading, selectCls } from '../components/ui'
+import EmailComposer from '../components/EmailComposer'
+import { Card, TRACKER_META, CloudFitPill, CloudChips, relativeTime, EmptyState, Loading, selectCls } from '../components/ui'
 
 const SUB_SCORES = [
   ['keyword_match_score', 'Keyword Match'],
@@ -30,10 +31,7 @@ export default function AtsDetail() {
   const [job, setJob] = useState(null)
   const [error, setError] = useState(false)
   const [copied, setCopied] = useState(false)
-
-  // Email modal state
-  const [email, setEmail] = useState({ status: 'idle', subject: '', body: '', toEmail: '', modelUsed: '', error: '' })
-  const bodyRef = useRef(null)
+  const [composing, setComposing] = useState(false)   // email composer open?
 
   useEffect(() => {
     fetch(`/api/jobs/${id}`)
@@ -54,35 +52,6 @@ export default function AtsDetail() {
       body: JSON.stringify({ status }),
     })
     setJob(j => ({ ...j, tracker_status: status }))
-  }
-
-  async function generateEmail() {
-    setEmail({ status: 'generating', subject: '', body: '', toEmail: '', modelUsed: '', error: '' })
-    try {
-      const r = await fetch(`/api/jobs/${id}/generate-email`, { method: 'POST' })
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.error || 'Generation failed')
-      setEmail({ status: 'ready', subject: d.subject, body: d.body, toEmail: d.to_email, modelUsed: d.model_used || '', error: '' })
-    } catch (e) {
-      setEmail(prev => ({ ...prev, status: 'error', error: e.message }))
-    }
-  }
-
-  async function sendEmail() {
-    setEmail(prev => ({ ...prev, status: 'sending', error: '' }))
-    try {
-      const r = await fetch(`/api/jobs/${id}/send-email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject: email.subject, body: email.body, to_email: email.toEmail, model_used: email.modelUsed }),
-      })
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.error || 'Send failed')
-      setEmail(prev => ({ ...prev, status: 'sent' }))
-      setJob(j => ({ ...j, tracker_status: 'applied' }))
-    } catch (e) {
-      setEmail(prev => ({ ...prev, status: 'ready', error: e.message }))
-    }
   }
 
   function copyKeywords() {
@@ -117,6 +86,22 @@ export default function AtsDetail() {
           <p className="text-muted text-sm mt-1">
             {[job.company, job.location, job.work_mode].filter(Boolean).join(' · ') || '—'}
           </p>
+          <div className="flex items-center gap-2.5 mt-2.5 flex-wrap">
+            <CloudFitPill fit={job.cloud_fit} />
+            <CloudChips clouds={job.clouds_list} />
+            {job.posted_at && (() => {
+              const age = relativeTime(job.posted_at)
+              return (
+                <span className={`inline-flex items-center gap-1 text-[11px] font-semibold ${age.fresh ? 'text-success' : 'text-muted'}`}>
+                  <span className="material-symbols-outlined text-[14px]">schedule</span>
+                  Posted {age.text}
+                </span>
+              )
+            })()}
+            {job.experience_min != null && (
+              <span className="text-[11px] text-muted font-mono">{job.experience_min}–{job.experience_max ?? '?'} yrs</span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2.5 flex-wrap">
           <select
@@ -129,13 +114,10 @@ export default function AtsDetail() {
           </select>
           {job.recruiter_email && (
             <button
-              onClick={generateEmail}
-              disabled={email.status === 'generating'}
-              className="bg-accent text-accent-ink px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wide hover:brightness-110 flex items-center gap-2 shadow-lg shadow-accent/25 disabled:opacity-60 disabled:cursor-wait">
-              <span className="material-symbols-outlined text-[18px]">
-                {email.status === 'generating' ? 'sync' : 'send'}
-              </span>
-              {email.status === 'generating' ? 'Generating…' : 'Send Email'}
+              onClick={() => setComposing(true)}
+              className="bg-accent text-accent-ink px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wide hover:brightness-110 flex items-center gap-2 shadow-lg shadow-accent/25">
+              <span className="material-symbols-outlined text-[18px]">send</span>
+              Send Email
             </button>
           )}
           <a href={job.post_url || '#'} target="_blank" rel="noopener noreferrer"
@@ -273,6 +255,56 @@ export default function AtsDetail() {
         </div>
       </Card>
 
+      {/* Outreach playbook — what the recruiter explicitly asked for */}
+      {(job.email_subject_format || (job.email_required_list || []).length || (job.outreach_history || []).length) ? (
+        <Card className="mb-6" title="Outreach Playbook" icon="contact_mail">
+          <div className="grid grid-cols-12 gap-5">
+            <div className="col-span-12 md:col-span-6 space-y-4">
+              {job.email_subject_format && (
+                <div>
+                  <p className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1.5">Required subject format</p>
+                  <code className="block bg-surface-2 rounded-lg px-3 py-2 text-xs text-ink font-mono break-words">{job.email_subject_format}</code>
+                </div>
+              )}
+              <div>
+                <p className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1.5">Fields the recruiter asked for</p>
+                {(job.email_required_list || []).length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {job.email_required_list.map(f => (
+                      <span key={f} className="px-2.5 py-1 bg-warning/10 text-warning rounded-full text-[11px] font-mono font-medium">
+                        {f.replace(/_/g, ' ')}
+                      </span>
+                    ))}
+                  </div>
+                ) : <span className="text-faint text-xs">No specific fields requested — standard application.</span>}
+              </div>
+            </div>
+            <div className="col-span-12 md:col-span-6">
+              <p className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1.5">Email history</p>
+              {(job.outreach_history || []).length ? (
+                <div className="space-y-2">
+                  {job.outreach_history.map((o, i) => (
+                    <div key={i} className="bg-surface-2 rounded-lg p-3 text-xs">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className={`font-bold uppercase text-[10px] px-2 py-0.5 rounded-full ${o.status === 'sent' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'}`}>{o.status}</span>
+                        <span className="text-faint font-mono">{o.sent_at ? o.sent_at.replace('T', ' ') : '—'}</span>
+                      </div>
+                      <p className="text-ink font-medium truncate">{o.subject || '—'}</p>
+                      {o.error && <p className="text-danger mt-0.5">{o.error}</p>}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-faint text-xs bg-surface-2 rounded-lg p-3">
+                  <span className="material-symbols-outlined text-[16px]">outgoing_mail</span>
+                  No email sent yet{job.recruiter_email ? ' — use Send Email above.' : '.'}
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
       {/* Raw post */}
       <Card title="Full Job Post" icon="description">
         <pre className="text-xs font-mono text-muted whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto custom-scrollbar">
@@ -280,88 +312,13 @@ export default function AtsDetail() {
         </pre>
       </Card>
 
-      {/* Email modal */}
-      {(email.status === 'ready' || email.status === 'sending' || email.status === 'sent' || email.status === 'error') && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
-          <div className="bg-[rgb(var(--bg))] border border-[rgb(var(--line))] rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
-
-            {/* Modal header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[rgb(var(--line))]">
-              <div>
-                <h3 className="font-bold text-ink text-base">Send Email to Recruiter</h3>
-                <p className="text-xs text-muted mt-0.5">To: {email.toEmail}</p>
-              </div>
-              <button onClick={() => setEmail({ status: 'idle', subject: '', body: '', toEmail: '', modelUsed: '', error: '' })}
-                className="text-muted hover:text-ink transition-colors">
-                <span className="material-symbols-outlined text-[22px]">close</span>
-              </button>
-            </div>
-
-            {/* Modal body */}
-            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-              {email.status === 'sent' ? (
-                <div className="flex flex-col items-center justify-center py-12 gap-3">
-                  <span className="material-symbols-outlined text-[48px] text-success">check_circle</span>
-                  <p className="font-semibold text-ink text-lg">Email sent!</p>
-                  <p className="text-muted text-sm">Tracker status auto-updated to Applied.</p>
-                </div>
-              ) : (
-                <>
-                  {email.error && (
-                    <div className="bg-danger/10 text-danger text-xs rounded-xl px-4 py-3 flex items-center gap-2">
-                      <span className="material-symbols-outlined text-[16px]">error</span>{email.error}
-                    </div>
-                  )}
-                  <div>
-                    <label className="block text-xs font-semibold text-muted mb-1.5 uppercase tracking-wider">Subject</label>
-                    <input
-                      type="text"
-                      value={email.subject}
-                      onChange={e => setEmail(p => ({ ...p, subject: e.target.value }))}
-                      className="w-full rounded-xl border border-[rgb(var(--line))] bg-[rgb(var(--surface))] text-ink text-sm px-4 py-2.5 focus:outline-none focus:border-accent transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-muted mb-1.5 uppercase tracking-wider">Body</label>
-                    <textarea
-                      ref={bodyRef}
-                      value={email.body}
-                      onChange={e => setEmail(p => ({ ...p, body: e.target.value }))}
-                      rows={14}
-                      className="w-full rounded-xl border border-[rgb(var(--line))] bg-[rgb(var(--surface))] text-ink text-sm px-4 py-2.5 font-mono leading-relaxed focus:outline-none focus:border-accent transition-colors resize-none custom-scrollbar"
-                    />
-                  </div>
-                  {email.modelUsed && (
-                    <p className="text-[11px] text-faint">Generated by {email.modelUsed}</p>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* Modal footer */}
-            {email.status !== 'sent' && (
-              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[rgb(var(--line))]">
-                <button onClick={() => setEmail({ status: 'idle', subject: '', body: '', toEmail: '', modelUsed: '', error: '' })}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-muted hover:text-ink border border-[rgb(var(--line))] transition-colors">
-                  Cancel
-                </button>
-                <button onClick={generateEmail}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-muted hover:text-accent border border-[rgb(var(--line))] transition-colors flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-[15px]">refresh</span>Regenerate
-                </button>
-                <button onClick={sendEmail}
-                  disabled={email.status === 'sending' || !email.subject || !email.body}
-                  className="bg-accent text-accent-ink px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-wide hover:brightness-110 flex items-center gap-2 disabled:opacity-60 disabled:cursor-wait shadow-lg shadow-accent/25">
-                  <span className="material-symbols-outlined text-[16px]">
-                    {email.status === 'sending' ? 'sync' : 'send'}
-                  </span>
-                  {email.status === 'sending' ? 'Sending…' : 'Send'}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Email composer (generate → preview → send) */}
+      {composing && (
+        <EmailComposer
+          job={job}
+          onClose={() => setComposing(false)}
+          onSent={() => setJob(j => ({ ...j, tracker_status: 'applied' }))}
+        />
       )}
     </>
   )

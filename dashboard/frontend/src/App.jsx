@@ -7,6 +7,7 @@ import AtsDetail from './pages/AtsDetail'
 import Tracker from './pages/Tracker'
 import SkillsGap from './pages/SkillsGap'
 import Recruiters from './pages/Recruiters'
+import Outreach from './pages/Outreach'
 import RawData from './pages/RawData'
 
 export default function App() {
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="/tracker" element={<Tracker />} />
           <Route path="/skills-gap" element={<SkillsGap />} />
           <Route path="/recruiters" element={<Recruiters />} />
+          <Route path="/outreach" element={<Outreach />} />
           <Route path="/raw-data" element={<RawData />} />
         </Routes>
       </Layout>

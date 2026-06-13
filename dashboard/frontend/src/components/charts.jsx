@@ -37,7 +37,8 @@ export function DonutChart({ data, size = 168, thickness = 22, centerLabel, cent
                 strokeWidth={thickness}
                 strokeDasharray={`${frac * circ} ${circ}`}
                 strokeDashoffset={-offset * circ}
-                style={{ transition: 'stroke-dasharray .6s ease' }}
+                style={{ transition: 'stroke-dasharray .6s ease, opacity .2s ease', filter: 'saturate(1.05)' }}
+                className="hover:opacity-80"
               >
                 <title>{`${d.label}: ${d.value} (${Math.round(frac * 100)}%)`}</title>
               </circle>
@@ -98,7 +99,8 @@ export function AreaChart({ data, height = 180, color = 'rgb(var(--chart-1))', v
           stroke="rgb(var(--line))" strokeDasharray="4 6" strokeWidth="1" />
       ))}
       <polygon points={area} fill={`url(#${gid})`} />
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"
+        style={{ filter: `drop-shadow(0 4px 8px ${color}55)` }} />
       {data.map((d, i) => (
         <g key={i}>
           <rect x={px(i) - stepX / 2} y={0} width={Math.max(stepX, 8)} height={H}

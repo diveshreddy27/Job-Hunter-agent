@@ -151,6 +151,29 @@ def api_stats():
     """):
         score_bands[row["band"]] = row["cnt"]
 
+    # Cloud-fit split across targeted jobs (the pipeline's core outreach signal)
+    cloud_fit = {r["cloud_fit"] or "unknown": r["cnt"] for r in conn.execute(
+        "SELECT cloud_fit, COUNT(*) as cnt FROM target_jobs GROUP BY cloud_fit"
+    )}
+
+    # Freshness — jobs whose LinkedIn post is recent (by posted_at, not scrape time)
+    fresh_24h = conn.execute(
+        "SELECT COUNT(*) FROM target_jobs t JOIN raw_posts r ON r.id=t.raw_post_id "
+        "WHERE r.posted_at >= datetime('now','-24 hours')"
+    ).fetchone()[0]
+    fresh_48h = conn.execute(
+        "SELECT COUNT(*) FROM target_jobs t JOIN raw_posts r ON r.id=t.raw_post_id "
+        "WHERE r.posted_at >= datetime('now','-48 hours')"
+    ).fetchone()[0]
+    # Hot leads: fresh (48h) + aws_match + score >= 60 — the outreach shortlist
+    hot_leads = conn.execute(
+        "SELECT COUNT(*) FROM target_jobs t "
+        "JOIN raw_posts r ON r.id=t.raw_post_id "
+        "JOIN ats_scores s ON s.target_job_id=t.id "
+        "WHERE r.posted_at >= datetime('now','-48 hours') "
+        "AND t.cloud_fit='aws_match' AND s.final_ats_score >= 60"
+    ).fetchone()[0]
+
     conn.close()
     return jsonify({
         "raw_total": raw_total,
@@ -173,15 +196,23 @@ def api_stats():
         },
         "work_modes": work_modes,
         "score_bands": score_bands,
+        "cloud_fit": cloud_fit,
+        "fresh_24h": fresh_24h,
+        "fresh_48h": fresh_48h,
+        "hot_leads": hot_leads,
     })
 
 
 @app.route("/api/jobs")
 def api_jobs():
-    score_min = request.args.get("score_min", 0, type=int)
-    work_mode = request.args.get("work_mode", "")
-    search    = request.args.get("q", "").strip()
-    sort      = request.args.get("sort", "score")
+    score_min   = request.args.get("score_min", 0, type=int)
+    work_mode   = request.args.get("work_mode", "")
+    search      = request.args.get("q", "").strip()
+    sort        = request.args.get("sort", "score")
+    cloud_fit   = request.args.get("cloud_fit", "")          # aws_match | no_cloud_req | other_cloud_only
+    posted_hrs  = request.args.get("posted_within", 0, type=int)  # 0 = any age
+    has_email   = request.args.get("has_email", "")          # "1" to require recruiter email
+    tracker     = request.args.get("tracker", "")            # tracker status filter; "untracked" supported
 
     conn = get_db()
     query = """
@@ -190,18 +221,19 @@ def api_jobs():
                n.title, n.company, n.location_city, n.location_state,
                n.work_mode, n.is_remote, n.experience_min, n.experience_max,
                n.recruiter_email, n.recruiter_name, n.apply_url,
-               n.skills,
+               n.skills, n.email_required_fields, n.email_subject_format,
                s.final_ats_score,
                s.shortlist_probability, s.interview_probability,
                s.matched_skills, s.critical_gap_skills,
                s.priority_changes, s.keyword_injections,
                s.seniority_fit_score, s.technical_skills_score,
-               r.scraped_at, r.post_url,
+               r.scraped_at, r.posted_at, r.post_url,
                k.status AS tracker_status
         FROM target_jobs t
         JOIN normalized_posts n ON n.id = t.norm_post_id
         JOIN raw_posts r        ON r.id = t.raw_post_id
-        LEFT JOIN ats_scores s  ON s.target_job_id = t.id         LEFT JOIN job_tracker k ON k.target_job_id = t.id
+        LEFT JOIN ats_scores s  ON s.target_job_id = t.id
+        LEFT JOIN job_tracker k ON k.target_job_id = t.id
         WHERE COALESCE(s.final_ats_score, 0) >= ?
     """
     params = [score_min]
@@ -210,12 +242,34 @@ def api_jobs():
         query += " AND n.work_mode = ?"
         params.append(work_mode)
 
+    if cloud_fit and cloud_fit != "all":
+        query += " AND t.cloud_fit = ?"
+        params.append(cloud_fit)
+
+    if posted_hrs and posted_hrs > 0:
+        query += " AND r.posted_at IS NOT NULL AND r.posted_at >= datetime('now', ? || ' hours')"
+        params.append(-posted_hrs)
+
+    if has_email == "1":
+        query += " AND n.recruiter_email IS NOT NULL AND TRIM(n.recruiter_email) != ''"
+
+    if tracker == "untracked":
+        query += " AND k.status IS NULL"
+    elif tracker and tracker != "all":
+        query += " AND k.status = ?"
+        params.append(tracker)
+
     if search:
         query += " AND (n.title LIKE ? OR n.company LIKE ? OR n.recruiter_email LIKE ? OR n.skills LIKE ?)"
         s = f"%{search}%"
         params += [s, s, s, s]
 
-    order = {"score": "s.final_ats_score DESC", "date": "r.scraped_at DESC", "interview": "s.interview_probability DESC"}
+    order = {
+        "score":     "s.final_ats_score DESC",
+        "date":      "r.scraped_at DESC",
+        "posted":    "r.posted_at DESC",
+        "interview": "s.interview_probability DESC",
+    }
     query += f" ORDER BY {order.get(sort, 'COALESCE(s.final_ats_score,0) DESC')}"
 
     rows = conn.execute(query, params).fetchall()
@@ -231,6 +285,7 @@ def api_jobs():
         d["priority_changes"]  = parse_json_field(d["priority_changes"])
         d["keyword_injections"] = parse_json_field(d["keyword_injections"])
         d["skills_list"] = [s.strip() for s in (d["skills"] or "").split(",") if s.strip()]
+        d["clouds_list"] = [c.strip() for c in (d["clouds_required"] or "").split(",") if c.strip()]
         d["location"] = ", ".join(filter(None, [d["location_city"], d["location_state"]]))
         result.append(d)
 
@@ -243,15 +298,22 @@ def api_job_detail(target_id):
     row = conn.execute("""
         SELECT t.id AS target_id,
                t.clouds_required, t.cloud_fit,
-               n.*, r.post_content, r.post_url, r.post_author, r.scraped_at,
+               n.*, r.post_content, r.post_url, r.post_author, r.scraped_at, r.posted_at,
                s.*,
                k.status AS tracker_status, k.notes AS tracker_notes
         FROM target_jobs t
         JOIN normalized_posts n ON n.id = t.norm_post_id
         JOIN raw_posts r        ON r.id = t.raw_post_id
-        LEFT JOIN ats_scores s  ON s.target_job_id = t.id         LEFT JOIN job_tracker k ON k.target_job_id = t.id
+        LEFT JOIN ats_scores s  ON s.target_job_id = t.id
+        LEFT JOIN job_tracker k ON k.target_job_id = t.id
         WHERE t.id = ?
     """, (target_id,)).fetchone()
+
+    # outreach history for this job (most recent first)
+    outreach = [dict(o) for o in conn.execute("""
+        SELECT to_email, subject, sent_at, status, error, model_used
+        FROM email_outreach WHERE target_job_id = ? ORDER BY id DESC
+    """, (target_id,)).fetchall()]
     conn.close()
 
     if not row:
@@ -266,6 +328,9 @@ def api_job_detail(target_id):
         d[field] = normalize_prob(d.get(field))
     d["location"] = ", ".join(filter(None, [d.get("location_city"), d.get("location_state")]))
     d["skills_list"] = [s.strip() for s in (d.get("skills") or "").split(",") if s.strip()]
+    d["clouds_list"] = [c.strip() for c in (d.get("clouds_required") or "").split(",") if c.strip()]
+    d["email_required_list"] = [f.strip() for f in (d.get("email_required_fields") or "").split(",") if f.strip()]
+    d["outreach_history"] = outreach
     return jsonify(d)
 
 
@@ -333,9 +398,9 @@ def api_raw_posts():
 
     total = conn.execute(f"SELECT COUNT(*) FROM raw_posts r {where}", params).fetchone()[0]
     rows = conn.execute(f"""
-        SELECT r.id, r.post_author, r.author_headline, r.scraped_at,
-               r.extraction_status, r.days_filter,
-               substr(r.post_content, 1, 400) as content_preview,
+        SELECT r.id, r.post_author, r.author_headline, r.scraped_at, r.posted_at,
+               r.extraction_status, r.days_filter, r.post_url,
+               r.post_content,
                n.title, n.company, n.work_mode, n.recruiter_email,
                n.experience_min, n.experience_max,
                s.final_ats_score
@@ -431,6 +496,24 @@ def api_analytics():
         "SELECT extracted_by, COUNT(*) AS cnt FROM normalized_posts GROUP BY extracted_by"
     )}
 
+    cloud_fit = {r["cloud_fit"] or "unknown": r["cnt"] for r in conn.execute(
+        "SELECT cloud_fit, COUNT(*) AS cnt FROM target_jobs GROUP BY cloud_fit"
+    )}
+
+    # Individual cloud-platform demand across targeted jobs (clouds_required is CSV)
+    cloud_demand = {"aws": 0, "azure": 0, "gcp": 0}
+    for row in conn.execute("SELECT clouds_required FROM target_jobs WHERE clouds_required != ''"):
+        for cl in (row["clouds_required"] or "").split(","):
+            cl = cl.strip().lower()
+            if cl in cloud_demand:
+                cloud_demand[cl] += 1
+
+    # Used by the scorer cascade — which model graded each job
+    model_usage = [dict(r) for r in conn.execute("""
+        SELECT COALESCE(model_used,'unknown') AS model, provider, COUNT(*) AS cnt
+        FROM ats_scores GROUP BY model_used ORDER BY cnt DESC
+    """)]
+
     conn.close()
     return jsonify({
         "top_companies": top_companies,
@@ -441,6 +524,9 @@ def api_analytics():
         "avg_sub_scores": avg_sub_scores,
         "score_trend": score_trend,
         "extracted_by": extracted_by,
+        "cloud_fit": cloud_fit,
+        "cloud_demand": cloud_demand,
+        "model_usage": model_usage,
     })
 
 
@@ -704,6 +790,33 @@ def api_send_email(target_id):
         conn.commit()
         conn.close()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/outreach")
+def api_outreach():
+    """Sent-email history joined with the job each email targeted."""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT e.id, e.target_job_id, e.to_email, e.subject, e.sent_at,
+               e.status, e.error, e.model_used,
+               n.title, n.company, n.recruiter_name,
+               s.final_ats_score
+        FROM email_outreach e
+        LEFT JOIN target_jobs t      ON t.id = e.target_job_id
+        LEFT JOIN normalized_posts n ON n.id = t.norm_post_id
+        LEFT JOIN ats_scores s       ON s.target_job_id = t.id
+        ORDER BY e.id DESC
+    """).fetchall()
+
+    sent   = sum(1 for r in rows if r["status"] == "sent")
+    failed = sum(1 for r in rows if r["status"] == "failed")
+    conn.close()
+    return jsonify({
+        "total": len(rows),
+        "sent": sent,
+        "failed": failed,
+        "rows": [dict(r) for r in rows],
+    })
 
 
 @app.route("/api/missing-fields")

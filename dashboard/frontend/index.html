@@ -31,6 +31,7 @@
             muted:     "rgb(var(--muted) / <alpha-value>)",
             faint:     "rgb(var(--faint) / <alpha-value>)",
             accent:    "rgb(var(--accent) / <alpha-value>)",
+            "accent-2": "rgb(var(--accent-2) / <alpha-value>)",
             "accent-ink": "rgb(var(--accent-ink) / <alpha-value>)",
             success:   "rgb(var(--success) / <alpha-value>)",
             warning:   "rgb(var(--warning) / <alpha-value>)",
@@ -50,59 +51,149 @@
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
     <style>
       :root {
-        --bg: 244 246 251;
+        --bg: 247 248 252;
         --surface: 255 255 255;
-        --surface-2: 241 245 249;
-        --surface-3: 226 232 240;
-        --line: 226 232 240;
-        --ink: 15 23 42;
-        --muted: 100 116 139;
-        --faint: 148 163 184;
-        --accent: 79 70 229;
+        --surface-2: 243 245 250;
+        --surface-3: 226 231 240;
+        --line: 226 231 240;
+        --ink: 13 18 33;
+        --muted: 90 102 124;
+        --faint: 148 160 178;
+        --accent: 99 91 255;
+        --accent-2: 168 85 247;
         --accent-ink: 255 255 255;
-        --success: 22 163 74;
-        --warning: 217 119 6;
+        --success: 16 152 84;
+        --warning: 202 110 8;
         --danger: 220 38 38;
-        --info: 2 132 199;
-        --chart-1: 99 102 241;
-        --chart-2: 34 197 94;
+        --info: 6 124 188;
+        --chart-1: 99 91 255;
+        --chart-2: 16 185 129;
         --chart-3: 245 158 11;
         --chart-4: 14 165 233;
         --chart-5: 236 72 153;
         --chart-6: 148 163 184;
-        --shadow: 0 1px 3px rgb(15 23 42 / 0.06), 0 4px 16px rgb(15 23 42 / 0.05);
+        --glass: 255 255 255;
+        --glass-alpha: 0.72;
+        --shadow: 0 1px 2px rgb(15 23 42 / 0.05), 0 8px 24px -8px rgb(15 23 42 / 0.10);
+        --shadow-lg: 0 4px 12px -2px rgb(15 23 42 / 0.08), 0 20px 48px -12px rgb(15 23 42 / 0.16);
+        --glow: 0 0 0 1px rgb(var(--accent) / 0.0);
+        --aurora-1: 99 91 255;
+        --aurora-2: 168 85 247;
+        --aurora-3: 14 165 233;
       }
       .dark {
-        --bg: 8 13 26;
-        --surface: 15 23 41;
-        --surface-2: 23 33 56;
-        --surface-3: 35 47 75;
-        --line: 34 45 70;
-        --ink: 226 232 240;
-        --muted: 148 163 184;
-        --faint: 100 116 139;
-        --accent: 129 140 248;
-        --accent-ink: 17 24 39;
-        --success: 74 222 128;
+        --bg: 6 9 20;
+        --surface: 14 19 36;
+        --surface-2: 22 29 51;
+        --surface-3: 36 46 76;
+        --line: 32 42 70;
+        --ink: 233 238 248;
+        --muted: 150 162 186;
+        --faint: 98 112 140;
+        --accent: 139 130 255;
+        --accent-2: 192 132 252;
+        --accent-ink: 9 12 24;
+        --success: 52 211 153;
         --warning: 251 191 36;
         --danger: 248 113 113;
         --info: 56 189 248;
-        --chart-1: 129 140 248;
-        --chart-2: 74 222 128;
+        --chart-1: 139 130 255;
+        --chart-2: 52 211 153;
         --chart-3: 251 191 36;
         --chart-4: 56 189 248;
         --chart-5: 244 114 182;
         --chart-6: 100 116 139;
-        --shadow: 0 1px 3px rgb(0 0 0 / 0.4), 0 4px 20px rgb(0 0 0 / 0.3);
+        --glass: 18 24 44;
+        --glass-alpha: 0.62;
+        --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 28px -8px rgb(0 0 0 / 0.5);
+        --shadow-lg: 0 8px 24px -6px rgb(0 0 0 / 0.5), 0 28px 64px -16px rgb(0 0 0 / 0.6);
+        --aurora-1: 99 91 255;
+        --aurora-2: 168 85 247;
+        --aurora-3: 14 165 233;
       }
       .material-symbols-outlined { font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24; vertical-align:middle; }
-      html, body { background-color: rgb(var(--bg)); color: rgb(var(--ink)); font-family:'Inter',system-ui,sans-serif; }
+      html, body { background-color: rgb(var(--bg)); color: rgb(var(--ink)); font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing: antialiased; }
       body, .card, aside, header { transition: background-color .25s ease, border-color .25s ease; }
-      .card { background: rgb(var(--surface)); border: 1px solid rgb(var(--line)); box-shadow: var(--shadow); }
-      .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
+
+      /* Ambient aurora — a soft, slow-drifting glow behind everything for depth. */
+      body::before {
+        content: ''; position: fixed; inset: -20% -10% auto -10%; height: 70vh; z-index: 0; pointer-events: none;
+        background:
+          radial-gradient(48vw 42vh at 18% 8%, rgb(var(--aurora-1) / 0.16), transparent 60%),
+          radial-gradient(42vw 40vh at 82% 0%, rgb(var(--aurora-2) / 0.14), transparent 60%),
+          radial-gradient(40vw 38vh at 60% 24%, rgb(var(--aurora-3) / 0.10), transparent 62%);
+        filter: blur(8px); opacity: 0.9;
+        animation: jh-aurora 22s ease-in-out infinite alternate;
+      }
+      .dark body::before { opacity: 0.7; }
+      @keyframes jh-aurora {
+        0%   { transform: translate3d(0,0,0) scale(1); }
+        50%  { transform: translate3d(2%, 1.5%, 0) scale(1.06); }
+        100% { transform: translate3d(-2%, 0.5%, 0) scale(1.02); }
+      }
+      #root { width: 100%; position: relative; z-index: 1; }
+
+      /* Frosted-glass card — translucent surface with a soft hairline + layered shadow. */
+      .card {
+        background: rgb(var(--glass) / var(--glass-alpha));
+        backdrop-filter: blur(14px) saturate(140%);
+        -webkit-backdrop-filter: blur(14px) saturate(140%);
+        border: 1px solid rgb(var(--line) / 0.9);
+        box-shadow: var(--shadow);
+        position: relative;
+      }
+      /* Top hairline sheen gives cards a subtle lit edge. */
+      .card::after {
+        content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+        background: linear-gradient(180deg, rgb(255 255 255 / 0.06), transparent 38%);
+      }
+      .dark .card::after { background: linear-gradient(180deg, rgb(255 255 255 / 0.04), transparent 40%); }
+      .card-hover { transition: transform .2s ease, box-shadow .25s ease, border-color .25s ease; }
+      .card-hover:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: rgb(var(--accent) / 0.4); }
+
+      /* Gradient utilities */
+      .gradient-text {
+        background: linear-gradient(100deg, rgb(var(--accent)), rgb(var(--accent-2)));
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
+      .gradient-accent { background: linear-gradient(120deg, rgb(var(--accent)), rgb(var(--accent-2))); }
+      .glow-accent { box-shadow: 0 8px 28px -8px rgb(var(--accent) / 0.55); }
+      .ring-grad { border: 1px solid transparent; background:
+        linear-gradient(rgb(var(--surface)), rgb(var(--surface))) padding-box,
+        linear-gradient(120deg, rgb(var(--accent) / 0.6), rgb(var(--accent-2) / 0.5)) border-box; }
+
+      .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
       .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
       .custom-scrollbar::-webkit-scrollbar-thumb { background: rgb(var(--surface-3)); border-radius: 10px; }
-      #root { width: 100%; }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgb(var(--accent) / 0.5); }
+
+      /* Skeleton loading — reserves layout space so content doesn't jump on load. */
+      @keyframes jh-shimmer { 100% { transform: translateX(100%); } }
+      .skeleton { position: relative; overflow: hidden; background: rgb(var(--surface-2)); }
+      .skeleton::after {
+        content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+        background: linear-gradient(90deg, transparent, rgb(var(--surface-3) / 0.65), transparent);
+        animation: jh-shimmer 1.5s infinite;
+      }
+
+      /* Staggered entrance — content rises and fades in on mount. */
+      @keyframes jh-fade-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+      .fade-up { animation: jh-fade-up .5s cubic-bezier(.22,.61,.36,1) both; }
+      .fade-up-1 { animation-delay: .04s; } .fade-up-2 { animation-delay: .10s; }
+      .fade-up-3 { animation-delay: .16s; } .fade-up-4 { animation-delay: .22s; }
+      .fade-up-5 { animation-delay: .28s; } .fade-up-6 { animation-delay: .34s; }
+      @keyframes jh-pulse-glow { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+
+      /* Honor users who prefer reduced motion — disable shimmer, spins, drift, and transitions. */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
+        body::before { animation: none !important; }
+      }
     </style>
   </head>
   <body>

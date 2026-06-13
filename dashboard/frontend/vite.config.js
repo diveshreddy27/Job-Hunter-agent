@@ -7,5 +7,8 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:5000',
     },
+    // On WSL with the project on the Windows mount (/mnt/c), native file
+    // events don't fire — without polling, HMR silently misses edits.
+    watch: { usePolling: true, interval: 300 },
   },
 })

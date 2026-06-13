@@ -104,6 +104,9 @@ def _record_missing_fields(fields: list, job_id) -> None:
 
 def _parse_response(text: str) -> dict:
     text = text.strip()
+    # Strip ```json … ``` fences some models wrap around the JSON
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.DOTALL).strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -115,6 +118,25 @@ def _parse_response(text: str) -> dict:
         except json.JSONDecodeError:
             pass
     raise ValueError(f"Could not parse JSON from model response: {text[:300]}")
+
+
+def _normalize_body(body: str) -> str:
+    """Models sometimes double-escape line breaks, returning literal '\\n'
+    instead of real newlines. Convert any literal escape sequences back to
+    real characters, then tidy paragraph spacing.
+
+    Idempotent: real newlines carry no backslash, so already-correct bodies
+    pass through unchanged.
+    """
+    if "\\n" in body or "\\t" in body or "\\r" in body:
+        body = (body.replace("\\r\\n", "\n")
+                    .replace("\\r", "\n")
+                    .replace("\\n", "\n")
+                    .replace("\\t", "\t"))
+    # Normalize CRLF, collapse 3+ blank lines to a single blank line, trim edges
+    body = body.replace("\r\n", "\n").replace("\r", "\n")
+    body = re.sub(r"\n{3,}", "\n\n", body)
+    return body.strip()
 
 
 def _call_gemini(model_id: str, prompt: str) -> dict:
@@ -174,8 +196,8 @@ def build_email(job: dict) -> dict:
                      m["id"], job.get("target_id"), missing or "none")
 
             return {
-                "subject":        result["subject"],
-                "body":           result["body"],
+                "subject":        " ".join(result["subject"].split()),  # subjects are single-line
+                "body":           _normalize_body(result["body"]),
                 "model_used":     m["id"],
                 "missing_fields": missing,
             }

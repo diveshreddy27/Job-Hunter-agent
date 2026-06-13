@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
+import EmailComposer from '../components/EmailComposer'
 import { PageHeader, ScoreChip, TRACKER_META, EmptyState, Loading, selectCls } from '../components/ui'
 
 const COLUMNS = ['saved', 'applied', 'interviewing', 'offer', 'rejected']
@@ -7,6 +8,7 @@ const COLUMNS = ['saved', 'applied', 'interviewing', 'offer', 'rejected']
 export default function Tracker() {
   const [items, setItems] = useState(null)
   const [notesDraft, setNotesDraft] = useState({})
+  const [composing, setComposing] = useState(null)
 
   const load = useCallback(() => {
     fetch('/api/tracker').then(r => r.json()).then(setItems)
@@ -119,10 +121,11 @@ export default function Tracker() {
                             </button>
                           )}
                           {item.recruiter_email && (
-                            <a href={`mailto:${item.recruiter_email}`} title={item.recruiter_email}
+                            <button title={`Email ${item.recruiter_email}`}
+                              onClick={() => setComposing({ target_id: item.target_job_id, recruiter_email: item.recruiter_email, title: item.title })}
                               className="text-faint hover:text-accent transition-colors">
-                              <span className="material-symbols-outlined text-[17px]">mail</span>
-                            </a>
+                              <span className="material-symbols-outlined text-[17px]">send</span>
+                            </button>
                           )}
                           <button title="Remove from tracker" onClick={() => remove(item.target_job_id)}
                             className="text-faint hover:text-danger transition-colors">
@@ -140,6 +143,14 @@ export default function Tracker() {
             )
           })}
         </div>
+      )}
+
+      {composing && (
+        <EmailComposer
+          job={composing}
+          onClose={() => setComposing(null)}
+          onSent={load}
+        />
       )}
     </>
   )

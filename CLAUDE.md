@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working in this repo.
 
 ## Project overview
 
-Personal job-hunting automation for a Data Engineer candidate. Scrapes LinkedIn recruiter posts, extracts structured fields with Gemini AI, scores each job against the candidate's resume, and surfaces results in a React dashboard.
+Personal job-hunting automation for a Data Engineer candidate. Scrapes LinkedIn recruiter posts, extracts structured fields with Gemini AI, scores each job against the candidate's resume, surfaces results in a React dashboard, and sends cold-outreach emails interactively.
 
 **4-stage fully concurrent pipeline:**
 
@@ -12,15 +12,25 @@ Personal job-hunting automation for a Data Engineer candidate. Scrapes LinkedIn 
 Stage 1 SCRAPE          Stage 2 EXTRACT           Stage 3 FILTER           Stage 4 SCORE
 ──────────────          ───────────────           ──────────────           ─────────────
 Playwright bot     →    Gemini AI parses     →    Location + exp      →    Unified model
-minimal pre-filter       raw queue files           + contract + email        cascade (Gemini
-writes data/queue/       inserts ALL posts         rules → target_jobs       + Groq) vs resume
-*.json batch files       into raw + norm DB        deletes batch file        writes ats_scores
-                         then deletes file         after final pass
+extracts posted_at       raw queue files           + contract + email        cascade (Gemini
+from "X hours ago"       inserts ALL posts         + cloud detection         + Groq) vs resume
+writes data/queue/       into raw + norm DB        + foreign remote          writes ats_scores
+*.json batch files       (email_subject_format      check → target_jobs
+                          email_required_fields)    deletes batch file
+                         then deletes file          after final pass
 ```
 
 Stages 1+2 run concurrently (producer/consumer). Stages 3+4 run concurrently and continuously
 alongside Stage 2, polling for new data as it arrives. All 4 stages start before the scraper
 begins, so scoring happens in real-time as posts flow through the pipeline.
+
+**Email outreach** (separate CLI, not part of pipeline):
+```
+scripts/send_outreach.py  →  filter by posted_at + cloud_fit + ATS score
+                          →  show full job details  →  y/n/q per job
+                          →  AI generates email (candidate_info.txt + resume + post)
+                          →  Gmail SMTP send with resume attached
+```
 
 ---
 
@@ -51,6 +61,17 @@ python main.py --visible             # show browser window
 python scripts/view_jobs.py      # all normalized_posts
 python scripts/view_scores.py    # ats_scores > 60, sorted by score
 
+# Re-score after editing resume / ats_prompt.txt (snapshots to data/scores_history.json)
+python scripts/rescore.py                    # archive current scores, clear, rescore all
+python scripts/rescore.py --label v3         # custom archive label
+python scripts/compare_scores.py             # diff last two snapshots
+python scripts/compare_scores.py --list      # list available snapshots
+
+# Email outreach CLI
+python scripts/send_outreach.py              # past 24h · aws_match · ATS ≥ 50
+python scripts/send_outreach.py --min-score 65
+python scripts/send_outreach.py --hours 48
+
 # Train local NER model
 python model/train.py                    # incremental — only new (is_trained='not_trained') posts
 python model/train.py --all              # retrain from scratch, ignores is_trained flag
@@ -70,68 +91,95 @@ settings.py                      global config — filter rules, model cascade d
 start_dashboard.sh               bash script: starts Flask (5000) + Vite (5173) together
 
 config/
-  candidate_profile.py           [gitignored] personal details injected into outreach emails
+  candidate_info.txt             [gitignored] flat text file — all personal details for email builder
+                                   format: KEY: value, missing fields marked (not provided)
+  candidate_info.example.txt     committed dummy-data template — copy → candidate_info.txt
   linkedin_cookies.json          [gitignored] saved LinkedIn session; delete to force re-login
 
 prompts/
   ats_prompt.txt                 system prompt for ATS scoring API call
-  email_builder_prompt.txt       prompt template for cold outreach email generation
+  email_builder_prompt.txt       3-source prompt: [MY_INFO] + [MY_RESUME] + [RAW_POST]
+                                   AI extracts subject, body, missing_fields from these three inputs
 
 scripts/
   view_jobs.py                   CLI: print all normalized_posts to terminal
   view_scores.py                 CLI: print ats_scores > 60 with full breakdown
+  send_outreach.py               Interactive outreach CLI — filters by posted_at + cloud_fit +
+                                   ATS score; shows full job detail; y/n/q per job;
+                                   generates email via AI cascade + sends via Gmail SMTP
+  rescore.py                     archive current scores → data/scores_history.json, clear
+                                   ats_scores, re-run the scorer cascade on all target_jobs
+                                   (use after editing the resume or ats_prompt.txt)
+  compare_scores.py              diff two score snapshots in data/scores_history.json — shows
+                                   which jobs moved up/down; --list to see available snapshots
 
 pipeline/
   scraper/
     linkedin_scraper.py          Stage 1: Playwright login, search, infinite-scroll posts feed;
                                    minimal pre-filter (URN + non-empty content only);
+                                   extracts "X hours ago" text → posted_at absolute timestamp;
                                    writes raw post dicts to StagingWriter buffer
     extractor.py                 Stage 2 helper: _normalize() routes to local NER or Gemini;
                                    _normalize_with_gemini() builds prompt, calls API, applies
-                                   two post-processing fixes:
+                                   post-processing fixes:
                                      Fix 1: derive location_state from city via INDIA_STATES map
                                      Fix 2: regex fallback for experience_max when Gemini misses it
+                                   also extracts: email_subject_format, email_required_fields
     location_utils.py            regex helpers: extract_location, extract_experience,
                                    extract_salary, extract_recruiter_email, detect_work_mode,
-                                   is_india_job, is_contract_role, experience_in_range
+                                   is_india_job, is_contract_role, experience_in_range,
+                                   parse_posted_hours, extract_locations (GeoText country detection)
+                                   _FOREIGN_HARD: explicit foreign markers (LATAM, MENA, GCC, etc.)
   staging/
     writer.py                    StagingWriter: buffers posts, flushes to data/queue/*.json
                                    at STAGING_BATCH_SIZE (default 10)
     processor.py                 daemon thread (Stage 2 worker):
                                    - polls data/queue/*.json every 2s
                                    - dedup check: skips URN already in raw_posts (no Gemini call)
+                                   - on dedup: calls backfill_posted_at() to update timestamp
                                    - calls _normalize() → Gemini (or local NER)
                                    - _ingest(raw, norm): inserts into raw_posts + normalized_posts
                                    - deletes batch file after processing
                                    - exits when stop_event set AND queue is empty
   ats/
     filter.py                    Stage 3: reads normalized_posts not yet in target_jobs;
-                                   applies 4 ordered business filters:
+                                   applies 4 ordered business filters + cloud detection:
                                      1. location (city/state/remote/null)
+                                        remote: also runs is_india_job() — rejects posts
+                                        mentioning foreign countries (Nigeria, LATAM, etc.)
                                      2. experience overlap with candidate window
                                      3. contract/freelance role check
                                      4. recruiter email present (REQUIRE_EMAIL_FOR_INGESTION)
-                                   passing posts → target_jobs
+                                   detect_clouds(): scans post + skills for AWS/GCP/Azure keywords;
+                                   strips #hashtags before matching (reach tags ≠ requirements);
+                                   sets clouds_required (csv) + cloud_fit (aws_match/no_cloud_req/
+                                   other_cloud_only) on insert → target_jobs
     scorer.py                    Stage 4: unified model cascade scorer with 3 parallel workers;
                                    pulls unscored target_jobs continuously; on 429 skips model
                                    until reset window; on 503 retries 3×; writes ats_scores
   outreach/
-    builder.py                   reads prompt + resume + job data, calls AI cascade,
-                                   returns {subject, body, model_used}
+    builder.py                   reads candidate_info.txt + resume + raw post content;
+                                   fills [MY_INFO]/[MY_RESUME]/[RAW_POST] placeholders in prompt;
+                                   calls Gemini/Groq cascade; parses {subject, body, missing_fields};
+                                   appends missing fields to data/missing_fields.json
     sender.py                    Gmail SMTP sender — attaches resume PDF, sends to recruiter
 
 db/
   schema.sql                     CREATE TABLE for all 5 tables + indexes
-  database.py                    all DB helpers: insert_raw_post (accepts scraped_at),
-                                   insert_normalized_post, insert_target_job, insert_ats_score,
-                                   get_pending_raw_posts, get_unscored_targets,
-                                   get_untrained_normalized_posts, mark_posts_trained,
-                                   stats, flush_all
+  database.py                    all DB helpers: insert_raw_post (accepts scraped_at + posted_at),
+                                   backfill_posted_at (UPDATE WHERE posted_at IS NULL),
+                                   insert_normalized_post, insert_target_job (clouds_required,
+                                   cloud_fit), insert_ats_score, get_pending_raw_posts,
+                                   get_unscored_targets, get_untrained_normalized_posts,
+                                   mark_posts_trained, stats, flush_all
 
 data/                            [gitignored] runtime data — never committed
   linkedin_scraper.db            SQLite database (WAL mode)
   model_usage/                   daily RPD counters persisted across runs
   queue/                         live batch files (data/queue/raw/) consumed by processor
+  scores_history.json            score snapshots written by scripts/rescore.py;
+                                   read by scripts/compare_scores.py to diff resume changes
+  missing_fields.json            recruiter-requested fields absent from candidate_info.txt
 
 dashboard/
   app.py                         Flask API server — REST endpoints only, no page rendering;
@@ -143,31 +191,45 @@ dashboard/
     vite.config.js               Vite with /api proxy → http://localhost:5000
     src/
       main.jsx                   React entry point
-      App.jsx                    BrowserRouter + 9 routes (/leaderboard redirects to /jobs)
+      App.jsx                    BrowserRouter + 10 routes (/leaderboard redirects to /jobs)
       index.css                  minimal body reset (Tailwind via CDN)
-      components/Layout.jsx      sidebar (grouped nav, theme toggle, pipeline status panel)
-                                   + topbar (search, Run Pipeline btn with live status polling)
-      components/charts.jsx      dependency-free SVG charts: DonutChart, AreaChart, HBarList,
-                                   ColumnChart, ScoreRing, GrowBar — colors from CSS vars
-      components/ui.jsx          PageHeader, Card, StatCard, ScoreChip, ModePill, TrackerBadge,
-                                   TRACKER_META, EmptyState, Loading, input/select classes
-      pages/Overview.jsx         landing: KPI cards · funnel w/ conversion % · score donut ·
-                                   work-mode donut · scrape trend · top jobs · extraction health
-      pages/Analytics.jsx        market insights: skill demand · companies · apply channels ·
-                                   experience donut · locations · score trend · resume profile
-      pages/Jobs.jsx             filterable jobs table (score/mode/search/sort) + save-to-tracker
+      components/Layout.jsx      glass sidebar (gradient brand, grouped nav w/ active rail,
+                                   theme toggle, pipeline status w/ live ping) + glass topbar
+                                   (search, gradient Run Pipeline btn with live status polling)
+      components/charts.jsx      dependency-free SVG charts: DonutChart, AreaChart (glow line),
+                                   HBarList, ColumnChart, ScoreRing, GrowBar — colors from CSS vars
+      components/ui.jsx          PageHeader (gradient title), Card (glass + optional hover),
+                                   StatCard (glow icon tile), ScoreChip (conic progress ring),
+                                   ModePill, TrackerBadge, TRACKER_META, CloudFitPill, CloudChips,
+                                   CLOUD_FIT_META, relativeTime(), EmptyState, Loading, Skeleton,
+                                   input/select classes
+      components/EmailComposer.jsx  modal for AI-drafting + editing + sending a cold email for a
+                                   job; calls /generate-email then /send-email; used by AtsDetail,
+                                   Jobs, and Tracker
+      pages/Overview.jsx         landing: KPI cards (incl. Hot Leads) · funnel w/ conversion % ·
+                                   score donut · work-mode + cloud-fit donuts · scrape trend ·
+                                   top jobs · extraction health
+      pages/Analytics.jsx        market insights: skill demand · companies · cloud demand ·
+                                   scoring models · apply channels · experience donut · locations ·
+                                   score trend · resume profile
+      pages/Jobs.jsx             filterable jobs table — filters: score/mode/cloud_fit/posted-age/
+                                   has-email/tracker-status/search/sort; Posted + Cloud columns;
+                                   save-to-tracker
       pages/Tracker.jsx          application tracker kanban: saved→applied→interviewing→offer/rejected
-      pages/AtsDetail.jsx        full job breakdown: sub-scores · skills · predictions · tracker control
+      pages/AtsDetail.jsx        full job breakdown: sub-scores · skills · predictions · cloud +
+                                   posted-age badges · Outreach Playbook (subject format, required
+                                   fields, email history) · tracker control · generate/send email
       pages/SkillsGap.jsx        gap skill bars · avg score ring · top resume changes · keyword cloud
       pages/Recruiters.jsx       recruiter directory with search
-      pages/RawData.jsx          paginated raw posts browser
+      pages/Outreach.jsx         sent-email history + missing candidate_info.txt fields
+      pages/RawData.jsx          paginated raw posts browser (shows posted_at + scraped_at)
 
 model/
   train.py                       incremental spaCy NER trainer — reads normalized_posts WHERE
                                    is_trained='not_trained', marks them trained after success;
                                    --all flag retrains from scratch on all posts
   predict.py                     LocalExtractor class: NER + regex, same API as Gemini extractor
-  linkedin_ner/                  trained spaCy model (JOB_TITLE, COMPANY, SKILL)
+  linkedin_ner/                  trained spaCy model (JOB_TITLE, COMPANY, SKILL, SUBJECT_FORMAT)
 
 utils/
   model_tracker.py               ModelUsageTracker: tracks daily RPD counts per Gemini model;
@@ -202,6 +264,13 @@ view_scores.py                   CLI: print ats_scores > 60 with full breakdown
 All business-logic filtering (India, experience, contract, email) is deliberately **not here** —
 Gemini normalizes first, then deterministic rules decide in Stage 3.
 
+**`posted_at` extraction:**
+- Reads `span.update-components-actor__sub-description` — the LinkedIn "X hours/days ago" element
+- Calls `parse_posted_hours(time_text)` → float hours elapsed
+- Computes `posted_at = now - timedelta(hours=hours_ago)` as an absolute ISO timestamp
+- Stored in `raw_posts.posted_at`; used by `send_outreach.py` to filter by actual post age
+- If the DOM element is missing, `posted_at = None` (graceful — old posts unaffected)
+
 **Output:** raw post dicts buffered in `StagingWriter`; flushed to `data/queue/raw/batch_TIMESTAMP.json`
 every `STAGING_BATCH_SIZE` (default 10) posts. Final flush on scraper exit.
 
@@ -213,9 +282,9 @@ every `STAGING_BATCH_SIZE` (default 10) posts. Final flush on scraper exit.
 - Polls `data/queue/raw/*.json` every 2 seconds
 - For each batch file, processes posts one by one:
 
-  1. **Dedup check** — queries `raw_posts WHERE activity_urn = ?`; skips if already in DB (no Gemini call wasted)
+  1. **Dedup check** — queries `raw_posts WHERE activity_urn = ?`; skips if already in DB (no Gemini call wasted); calls `backfill_posted_at()` on duplicate to update timestamp if it was previously null
   2. **`_normalize(raw)`** — routes to local NER model (when `USE_LOCAL_MODEL=True`) or Gemini API
-  3. **`_ingest(raw, norm)`** — atomically inserts into `raw_posts` + `normalized_posts`, preserves original `scraped_at` from batch file; returns `False` on duplicate URN (race condition guard)
+  3. **`_ingest(raw, norm)`** — atomically inserts into `raw_posts` + `normalized_posts`, preserves original `scraped_at` and `posted_at` from batch file; returns `False` on duplicate URN (race condition guard)
   4. **Deletes batch file** — once all posts in the file are processed (no `processed/` directory; data is in DB)
 
 - Exits when `stop_event` is set (scraper done) AND `data/queue/raw/` is empty
@@ -224,9 +293,11 @@ every `STAGING_BATCH_SIZE` (default 10) posts. Final flush on scraper exit.
 - Model: `GEMINI_EXTRACT_MODEL` (default `gemini-3.1-flash-lite`, 1000 RPD free tier)
 - Rate limit: `REQUEST_DELAY = 4.5s` between calls (15 RPM headroom)
 - RPD tracking: `ModelUsageTracker` skips model if daily quota hit
-- Returns structured JSON: title, company, location, experience, skills, recruiter email, apply info
+- Returns structured JSON: title, company, location, experience, skills, recruiter email, apply info, **email_subject_format**, **email_required_fields**
 - **Fix 1:** derives `location_state` from city via `INDIA_STATES` map when Gemini leaves state null
 - **Fix 2:** regex fallback for `experience_max` when Gemini returns only min
+- **email_subject_format:** exact subject line format recruiter specified (e.g. `Name | Role | Exp | CTC | NP`)
+- **email_required_fields:** comma-separated token list of fields recruiter explicitly requests — mapped to canonical tokens: `current_ctc`, `expected_ctc`, `notice_period`, `current_location`, `preferred_locations`, `experience`, `current_company`, `current_designation`, `open_to_relocation`, `pan_number`, `linkedin_url`, `github_url`, `availability`, `work_mode_preference`, `resume_link`
 
 **Local NER fallback:**
 - When `USE_LOCAL_MODEL=True`, tries spaCy NER model first; falls back to Gemini if no title extracted
@@ -242,12 +313,20 @@ every `STAGING_BATCH_SIZE` (default 10) posts. Final flush on scraper exit.
 
 | # | Filter | Logic |
 |---|--------|-------|
-| 1 | **Location** | city in `ATS_TARGET_CITIES` OR state in `ATS_TARGET_STATES` OR `is_remote=1` OR (both null AND `ATS_INCLUDE_NULL_LOCATION=True`) |
+| 1 | **Location** | city in `ATS_TARGET_CITIES` OR state in `ATS_TARGET_STATES` OR (`is_remote=1` AND post is India/global — see below) OR (both null AND `ATS_INCLUDE_NULL_LOCATION=True`) |
 | 2 | **Experience** | `exp_min ≤ ATS_CANDIDATE_EXP_MAX AND exp_max ≥ ATS_CANDIDATE_EXP_MIN` (or both null → pass) |
 | 3 | **Contract** | `role_type != 'contract'` AND `is_contract_role(post_content)` is False |
 | 4 | **Email** | `recruiter_email` is non-null (when `REQUIRE_EMAIL_FOR_INGESTION=True`) |
 
-- Passing posts → `target_jobs` (insert; skip on duplicate)
+**Foreign remote rejection (within filter 1):**
+When `is_remote=1`, also runs `is_india_job(post_content, location_hint)`. If it returns False (foreign country detected with no India signal), the post is rejected with reason `"remote but foreign country detected"`. Posts with no detectable country pass (global/ambiguous = keep). `_FOREIGN_HARD` covers regional abbreviations GeoText doesn't resolve: `latam`, `latin america`, `mena region`, `gcc region`, `apac region`, `emea region`.
+
+**Cloud detection (on passing posts):**
+`detect_clouds(post_content, skills)` scans for AWS/GCP/Azure keywords. Strips `#hashtags` before matching (recruiters add `#aws` for LinkedIn reach, not as job requirements). Sets:
+- `clouds_required`: comma-separated detected platforms (e.g. `"aws,gcp"`)
+- `cloud_fit`: `aws_match` | `no_cloud_req` | `other_cloud_only`
+
+- Passing posts → `target_jobs` with `clouds_required` + `cloud_fit` (insert; skip on duplicate)
 - Logs PASS/SKIP reason for every post
 - Runs a **final pass** after scraper_done event, then sets `filter_done` to unblock scorer exit
 
@@ -323,10 +402,10 @@ Two threading events coordinate the shutdown:
 
 ---
 
-## Database — 5 tables
+## Database — 6 tables
 
 `db/linkedin_scraper.db` (SQLite, WAL mode). All pipeline writes go through `db/database.py`.
-`job_tracker` is written only by `dashboard/app.py`.
+`job_tracker` and `email_outreach` are written only by `dashboard/app.py` (both auto-created on startup).
 
 ### `raw_posts`
 Source of truth. One row per unique LinkedIn post (dedup by `activity_urn`).
@@ -341,7 +420,8 @@ Source of truth. One row per unique LinkedIn post (dedup by `activity_urn`).
 | `author_headline` | TEXT | recruiter's LinkedIn headline |
 | `profile_url` | TEXT | recruiter's LinkedIn profile |
 | `days_filter` | INTEGER | 1, 7, or 30 |
-| `scraped_at` | TEXT | original scrape time from batch file (ISO 8601) |
+| `scraped_at` | TEXT | our scrape time (ISO 8601) |
+| `posted_at` | TEXT | actual LinkedIn post time derived from "X hours ago" (ISO 8601, nullable for old posts) |
 | `extraction_status` | TEXT | `pending` → `done` or `failed` |
 | `extracted_at` | TEXT | when extraction completed |
 | `extract_error` | TEXT | error string if failed |
@@ -354,13 +434,16 @@ This is the training dataset for the local NER model.
 Key columns: `title`, `company`, `location_city`, `location_state`, `is_remote` (0/1),
 `work_mode` (remote/hybrid/onsite), `experience_min/max`, `skills` (CSV),
 `recruiter_email/name/designation/current_company`, `apply_via`, `apply_url`,
+`email_subject_format` (recruiter's subject line template or null),
+`email_required_fields` (canonical token CSV of fields recruiter asked for, or null),
 `extracted_by` (gemini/local_ner), `created_at`,
 `is_trained` (`not_trained` → `trained` after NER training run).
 
 ### `target_jobs`
-Posts that passed **all 4** Stage 3 filters. Bridge to `ats_scores`.
+Posts that passed **all 4** Stage 3 filters + cloud detection. Bridge to `ats_scores`.
 
-Columns: `norm_post_id` (UNIQUE FK), `raw_post_id` (shortcut FK), `filtered_at`.
+Columns: `norm_post_id` (UNIQUE FK), `raw_post_id` (shortcut FK), `filtered_at`,
+`clouds_required` (comma-sep: `aws`, `gcp`, `azure`), `cloud_fit` (`aws_match` | `no_cloud_req` | `other_cloud_only`).
 
 ### `ats_scores`
 Full ATS evaluation. One row per `target_job` (UNIQUE on `target_job_id`).
@@ -377,6 +460,13 @@ Application tracker, driven by dashboard UI only. Auto-created by `dashboard/app
 Columns: `target_job_id` (UNIQUE FK), `status` (saved|applied|interviewing|offer|rejected),
 `notes`, `updated_at`.
 
+### `email_outreach`
+Cold-email send log, written by `dashboard/app.py` on every send attempt (and surfaced by
+`/api/outreach` + the AtsDetail Outreach Playbook). Auto-created on startup.
+
+Columns: `target_job_id` (FK), `to_email`, `subject`, `body_text`, `sent_at`,
+`status` (sent|failed|pending), `error`, `model_used`.
+
 ---
 
 ## Dashboard API endpoints
@@ -385,26 +475,30 @@ All under `/api/` — Flask server on port 5000, proxied by Vite on port 5173.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/stats` | GET | overview counts, funnel (today's scraped/extracted/filtered/scored), score bands, work modes, scrape-by-date chart |
-| `/api/analytics` | GET | market insights: top companies/skills/locations, exp buckets, apply channels, avg sub-scores, score trend, extracted_by breakdown |
-| `/api/jobs` | GET | scored jobs (incl. `tracker_status`); params: `score_min`, `work_mode`, `q`, `sort` (score/date/interview) |
-| `/api/jobs/<id>` | GET | full job detail for ATS detail page (incl. tracker status/notes) |
+| `/api/stats` | GET | overview counts, funnel, score bands, work modes, scrape-by-date chart, `cloud_fit` split, `fresh_24h`/`fresh_48h`, `hot_leads` (fresh+aws+60) |
+| `/api/analytics` | GET | market insights: companies/skills/locations, exp buckets, apply channels, avg sub-scores, score trend, extracted_by, `cloud_fit`, `cloud_demand` (aws/azure/gcp), `model_usage` |
+| `/api/jobs` | GET | scored jobs (incl. `tracker_status`, `posted_at`, `cloud_fit`, `clouds_list`); params: `score_min`, `work_mode`, `cloud_fit`, `posted_within` (hours), `has_email`, `tracker`, `q`, `sort` (score/date/posted/interview) |
+| `/api/jobs/<id>` | GET | full job detail (incl. tracker status/notes, `posted_at`, `clouds_list`, `email_required_list`, `email_subject_format`, `outreach_history`) |
+| `/api/jobs/<id>/generate-email` | POST | AI-generate `{subject, body, missing_fields}` via outreach builder cascade |
+| `/api/jobs/<id>/send-email` | POST | send `{subject, body, to_email}` via Gmail SMTP; logs to `email_outreach`; auto-marks tracker `applied` |
 | `/api/skills-gap` | GET | critical_gap_skills frequency across all ats_scores, top 20 |
 | `/api/recruiters` | GET | unique recruiters grouped by email; includes avg/best score, post count |
-| `/api/raw-posts` | GET | paginated raw_posts joined with normalized + scores; params: `page`, `limit`, `q` |
+| `/api/raw-posts` | GET | paginated raw_posts joined with normalized + scores (incl. `posted_at`); params: `page`, `limit`, `q` |
 | `/api/tracker` | GET | all tracked jobs with status + job info + interview probability |
 | `/api/tracker/<target_id>` | POST | upsert `{status, notes}`; status ∈ saved/applied/interviewing/offer/rejected |
 | `/api/tracker/<target_id>` | DELETE | remove job from tracker |
+| `/api/outreach` | GET | sent-email history from `email_outreach` joined with job + score; totals sent/failed |
 | `/api/pipeline-status` | GET | `running` flag, pending extraction count, unscored targets, last run time |
 | `/api/run-pipeline` | POST | spawns `python main.py` as background subprocess (no-op if already running) |
 | `/api/train-ner/status` | GET | NER training state: running, last_run, untrained_count, error |
 | `/api/train-ner` | POST | trigger incremental NER training in background; body `{"all":true}` to retrain from scratch |
+| `/api/missing-fields` | GET | fields recruiter asked for that were missing from candidate_info.txt; sorted by frequency |
 
 ---
 
 ## NER training lifecycle
 
-Goal: replace Gemini extraction (Stage 2) with a local spaCy model trained on accumulated data.
+Goal: supplement Gemini extraction (Stage 2) with a local spaCy model for faster/offline use.
 
 ```
 Every Gemini call → normalized_posts (is_trained='not_trained')
@@ -412,7 +506,7 @@ Every Gemini call → normalized_posts (is_trained='not_trained')
           POST /api/train-ner  (or  python model/train.py)
                          │
      reads WHERE is_trained='not_trained' AND title IS NOT NULL
-     trains JOB_TITLE, COMPANY, SKILL entities
+     trains JOB_TITLE, COMPANY, SKILL, SUBJECT_FORMAT entities
      marks processed rows → is_trained='trained'
                          │
           next call trains only on NEW posts (incremental)
@@ -420,6 +514,30 @@ Every Gemini call → normalized_posts (is_trained='not_trained')
 
 Once model quality is acceptable: set `USE_LOCAL_MODEL = True` in `settings.py`.
 Gemini remains active as fallback when local model returns no title.
+
+## Email outreach lifecycle
+
+```
+send_outreach.py
+     │
+     ├── Query: posted_at >= now-24h AND cloud_fit='aws_match' AND ats_score >= 50
+     │          (posted_at = actual LinkedIn post time, not scrape time)
+     │
+     ├── Display all job details (scores, predictions, recruiter, raw post, email hints)
+     │
+     ├── y → build_email(job)
+     │         reads candidate_info.txt (flat key:value, missing = "(not provided)")
+     │         reads resume PDF/TXT from resume/
+     │         fills [MY_INFO]/[MY_RESUME]/[RAW_POST] in email_builder_prompt.txt
+     │         calls Gemini cascade → {subject, body, missing_fields}
+     │         appends missing_fields → data/missing_fields.json (accumulates over time)
+     │         → send_email(to, subject, body) via Gmail SMTP with resume attached
+     │
+     └── n / q → skip / quit
+```
+
+`data/missing_fields.json` tracks which fields recruiters asked for that weren't in
+`candidate_info.txt`. View via `/api/missing-fields` or directly. Fill them in over time.
 
 ---
 
@@ -432,6 +550,10 @@ Gemini remains active as fallback when local model returns no title.
 | `CANDIDATE_EXPERIENCE_MIN/MAX` | 2.0 / 4.0 | Informational only; real filter is Stage 3 |
 | `GEMINI_API_KEY` | — | Google AI Studio key |
 | `GROQ_API_KEY` | — | Groq console key (prefix `gsk_`, NOT xAI's `xai-`) |
+| `SENDER_EMAIL` | — | Gmail address for sending outreach emails |
+| `SMTP_APP_PASSWORD` | — | Gmail App Password (Google Account → Security → App Passwords) |
+| `SMTP_SERVER` | `smtp.gmail.com` | SMTP server (hardcoded; change if not using Gmail) |
+| `SMTP_PORT` | `587` | SMTP port for STARTTLS |
 | `GEMINI_EXTRACT_MODEL` | `gemini-3.1-flash-lite` | Extraction model (Stage 2), 1000 RPD |
 | `GEMINI_MODEL_LIMITS` | see settings.py | RPD caps per model for daily quota tracking |
 | `ATS_UNIFIED_MODELS` | 10-model list | Scorer cascade ordered best → worst quality |
@@ -470,11 +592,20 @@ Gemini remains active as fallback when local model returns no title.
   loading. Classes are JIT-compiled in the browser. If `npm run dev` fails with
   "Error parsing …/package.json: not valid JSON", a node_modules file got NUL-corrupted —
   fix with `rm -rf node_modules/<pkg> && npm install <pkg> --no-save`.
+- **Vite HMR requires polling on WSL** — `vite.config.js` sets `server.watch.usePolling: true`.
+  The project lives on the Windows mount (`/mnt/c`), where native file-change events don't fire,
+  so without polling the browser silently keeps running stale code after every edit. Symptom of a
+  regression here: edits to `.jsx` files don't appear until a manual server restart.
 - Theming: light/dark via CSS variables in `index.html` (`:root` = light, `.dark` = dark)
-  mapped to semantic Tailwind tokens (`bg`, `surface`, `ink`, `muted`, `accent`, `line`,
-  `--chart-1..6`). Charts in `charts.jsx` reference `rgb(var(--…))` directly so they
-  re-theme automatically. Toggle persists to `localStorage('jh-theme')`; head script applies
-  it before first paint. When adding UI: use semantic tokens, never hardcode hex colors.
+  mapped to semantic Tailwind tokens (`bg`, `surface`, `surface-2/3`, `ink`, `muted`, `faint`,
+  `accent`, `accent-2`, `line`, `--chart-1..6`). The accent is a two-stop gradient
+  (`accent` → `accent-2`); reusable visual helpers live in `index.html`'s `<style>`:
+  `.card` (frosted glass + hairline), `.card-hover`, `.gradient-text`, `.gradient-accent`,
+  `.glow-accent`, and `.fade-up`/`.fade-up-1..6` staggered entrance. An ambient aurora glow
+  (`body::before`) sits behind content; all motion respects `prefers-reduced-motion`. Charts in
+  `charts.jsx` reference `rgb(var(--…))` directly so they re-theme automatically. Toggle persists
+  to `localStorage('jh-theme')`; head script applies it before first paint. When adding UI: use
+  semantic tokens and these helpers, never hardcode hex colors.
 - `db/database.py` runs additive migrations on `init_db()`: adds `skills`, `is_trained`
   columns to `normalized_posts` if missing; adds `tailored_resume_path`, `provider` columns
   to `ats_scores` if missing; collapses legacy `UNIQUE(target_job_id, provider)` constraint

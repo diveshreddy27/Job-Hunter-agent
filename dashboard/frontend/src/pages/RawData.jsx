@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { scoreColor } from '../components/charts'
-import { PageHeader, ModePill, EmptyState, Loading, inputCls } from '../components/ui'
+import { PageHeader, ModePill, relativeTime, EmptyState, Loading, inputCls } from '../components/ui'
 
 function StatusBadge({ s }) {
   const styles = {
@@ -61,8 +61,12 @@ export default function RawData() {
                   </div>
                   <div>
                     <p className="font-semibold text-ink text-sm">{r.post_author || 'Unknown'}</p>
-                    <p className="text-[11px] text-faint font-mono">
-                      {r.scraped_at ? r.scraped_at.slice(0, 16).replace('T', ' ') : '—'} · past {r.days_filter}d window
+                    <p className="text-[11px] text-faint font-mono flex items-center gap-1.5 flex-wrap">
+                      {r.posted_at && (() => {
+                        const age = relativeTime(r.posted_at)
+                        return <span className={age.fresh ? 'text-success' : ''}>posted {age.text} ·</span>
+                      })()}
+                      scraped {r.scraped_at ? r.scraped_at.slice(0, 16).replace('T', ' ') : '—'} · past {r.days_filter}d
                     </p>
                   </div>
                 </div>
@@ -92,13 +96,23 @@ export default function RawData() {
               )}
 
               <p className={`text-[13px] text-muted leading-relaxed whitespace-pre-line ${expanded[r.id] ? '' : 'line-clamp-3'}`}>
-                {r.content_preview || ''}
+                {r.post_content || ''}
               </p>
-              <button
-                onClick={() => setExpanded(p => ({ ...p, [r.id]: !p[r.id] }))}
-                className="text-accent text-xs font-semibold hover:underline mt-1.5">
-                {expanded[r.id] ? 'Show less' : 'Show more'}
-              </button>
+              <div className="flex items-center gap-4 mt-1.5">
+                {(r.post_content || '').length > 220 && (
+                  <button
+                    onClick={() => setExpanded(p => ({ ...p, [r.id]: !p[r.id] }))}
+                    className="text-accent text-xs font-semibold hover:underline cursor-pointer">
+                    {expanded[r.id] ? 'Show less' : 'Show more'}
+                  </button>
+                )}
+                {r.post_url && (
+                  <a href={r.post_url} target="_blank" rel="noopener noreferrer"
+                    className="text-faint text-xs font-semibold hover:text-accent transition-colors inline-flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[14px]">open_in_new</span>View on LinkedIn
+                  </a>
+                )}
+              </div>
             </div>
           ))}
         </div>

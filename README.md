@@ -1,6 +1,6 @@
 # Job Hunter Agent
 
-A personal job-hunting automation pipeline for Data Engineer roles in India. It scrapes LinkedIn recruiter posts, extracts structured job data with Gemini AI, scores each job against your resume with an enterprise-grade ATS engine, and surfaces everything in a React dashboard.
+A personal job-hunting automation pipeline for Data Engineer roles in India. Scrapes LinkedIn recruiter posts, extracts structured job data with Gemini AI, scores each job against your resume with an enterprise-grade ATS engine, surfaces everything in a React dashboard, and sends cold-outreach emails with one keystroke.
 
 ## How It Works
 
@@ -9,26 +9,43 @@ LinkedIn Posts
      │
      ▼
 Stage 1 — SCRAPE (Playwright)
-  Pre-filter: hiring CTA · India · not contract · has email · experience window
-     │ writes raw_posts
+  Extracts: post content · author · recruiter info · posted_at timestamp
+  Minimal pre-filter: URN resolvable + non-empty content
+  Writes raw batch files → data/queue/raw/
+     │
      ▼
 Stage 2 — EXTRACT (Gemini AI, concurrent thread)
   Parses: title · company · location · skills · recruiter info · apply path
-     │ writes normalized_posts
+          email_subject_format · email_required_fields
+  Writes normalized_posts; deletes batch file
+     │
      ▼
-Stage 3 — FILTER (rules)
-  Location: Hyderabad · Mumbai · Pune · Chennai · Bengaluru · Kolkata · remote/unknown
+Stage 3 — FILTER (deterministic rules, concurrent thread)
+  Location : target cities / states / remote (India only) / null
   Experience: overlaps candidate window (2–4 yrs)
-     │ writes target_jobs
+  Contract  : rejects contract/freelance roles
+  Email     : recruiter email must be present
+  Cloud     : detects AWS/GCP/Azure → cloud_fit tag (hashtags stripped)
+  Remote    : rejects remote jobs that mention non-India countries
+  Writes target_jobs with clouds_required + cloud_fit
+     │
      ▼
-Stage 4 — SCORE (Gemini AI cascade)
-  11 sub-scores · 4 probability predictions · matched/gap skills · keyword injections
-     │ writes ats_scores
+Stage 4 — SCORE (Gemini / Groq cascade, 3 parallel workers)
+  11 sub-scores · 4 probability predictions · matched/gap skills
+  keyword injections · resume strengths/weaknesses · priority changes
+  Writes ats_scores
+     │
      ▼
-React Dashboard  ←→  Flask API (port 5000)
+React Dashboard ←→ Flask API (port 5000)
+
+     + Interactive Email Outreach CLI
+       scripts/send_outreach.py
+       (posted in last 24h · AWS match · ATS ≥ 50)
 ```
 
-All four stages run end-to-end when you call `python main.py`. Stages 1 and 2 run concurrently (producer/consumer threads); stages 3 and 4 run sequentially after extraction drains.
+All four stages run concurrently when you call `python main.py`. Stage 1+2 are producer/consumer; stages 3+4 poll for new data continuously alongside them.
+
+---
 
 ## Setup
 
@@ -43,182 +60,245 @@ python -m playwright install-deps   # Linux / WSL only
 cd dashboard/frontend && npm install
 ```
 
-### Configure `settings.py`
+### Configure `.env`
+
+Copy `.env.example` → `.env` and fill in:
 
 | Key | What to set |
 |-----|-------------|
-| `SCRAPE_LINKEDIN_EMAIL` / `SCRAPE_LINKEDIN_PASSWORD` | A dedicated scraping account (not your main LinkedIn) |
-| `LINKEDIN_SEARCH_QUERY` | Search query, e.g. `'"Data Engineer" and "hiring" and "aws"'` |
-| `TARGET_ROLE` | Your target role label (used in logging) |
-| `CANDIDATE_EXPERIENCE_MIN/MAX` | Your years of experience window (pre-scrape filter) |
-| `ATS_CANDIDATE_EXP_MIN/MAX` | Experience window for the ATS filter (post-extraction) |
+| `SCRAPE_LINKEDIN_EMAIL` / `SCRAPE_LINKEDIN_PASSWORD` | Dedicated scraping account (not your main LinkedIn) |
 | `GEMINI_API_KEY` | Free key from [aistudio.google.com](https://aistudio.google.com/app/apikey) |
-| `ATS_TARGET_CITIES` / `ATS_TARGET_STATES` | Cities/states you're willing to work in |
+| `GROQ_API_KEY` | Free key from [console.groq.com](https://console.groq.com) (prefix `gsk_`) |
+| `SENDER_EMAIL` | Gmail address to send outreach from |
+| `SMTP_APP_PASSWORD` | Gmail App Password (myaccount.google.com → Security → App Passwords) |
+
+Key settings in `settings.py`:
+
+| Variable | Purpose |
+|----------|---------|
+| `LINKEDIN_SEARCH_QUERY` | LinkedIn search string |
+| `ATS_CANDIDATE_EXP_MIN/MAX` | Your experience window for Stage 3 filter |
+| `ATS_TARGET_CITIES/STATES` | Cities/states you're willing to work in |
+| `REQUIRE_EMAIL_FOR_INGESTION` | Drop posts without a recruiter email (default True) |
+
+### Candidate info
+
+Copy `config/candidate_info.example.txt` → `config/candidate_info.txt` and fill in your details. The email builder reads this directly — mark missing fields as `(not provided)` and they'll be tracked in `data/missing_fields.json` for incremental improvement.
+
+### Resume
+
+Drop your resume as `resume/YourName_Resume.pdf` (or `.txt`). The scorer and email builder auto-detect it.
 
 ### LinkedIn cookies
 
 On first run, `config/linkedin_cookies.json` doesn't exist — the scraper does a fresh headless login and saves the session. If LinkedIn shows a security checkpoint, a visible browser opens automatically; solve it and press Enter. Delete the cookie file to force a fresh login.
 
-### Resume
+---
 
-Drop your resume as `resume/YourName_Resume.pdf` (or `.txt`). The ATS scorer reads it automatically — no config needed.
-
-## Running the Scraper
+## Running the Pipeline
 
 ```bash
 python main.py                       # past 24h, headless
 python main.py --days 7              # past week
 python main.py --days 30 --limit 50  # past month, capped at 50 posts
 python main.py --visible             # show the browser window
-python main.py --no-email-filter     # keep posts without a recruiter email
 ```
 
-## Running the Dashboard
+---
+
+## Email Outreach
+
+```bash
+python scripts/send_outreach.py              # past 24h · AWS match · ATS ≥ 50
+python scripts/send_outreach.py --min-score 65
+python scripts/send_outreach.py --hours 48
+```
+
+Shows every detail for each matching job (all scores, predictions, recruiter info, full post). Type `y` to generate + send email, `n` to skip, `q` to quit.
+
+- Email is generated by AI using your `candidate_info.txt` + resume + raw post
+- Resume PDF attached automatically
+- Any fields the recruiter asked for that are missing from your info file are logged to `data/missing_fields.json`
+
+---
+
+## Dashboard
 
 ```bash
 ./start_dashboard.sh
 ```
 
-Opens both servers and prints URLs. Press `Ctrl+C` to stop both.
+| Server | URL |
+|--------|-----|
+| Flask API | http://localhost:5000 |
+| React UI  | http://localhost:5173 |
 
-| Server | URL | Purpose |
-|--------|-----|---------|
-| Flask API | http://localhost:5000 | REST endpoints only |
-| React UI | http://localhost:5173 | Dashboard (proxies `/api/*` to Flask) |
+A modern, theme-aware (light/dark) React UI — frosted-glass cards, gradient accents, an ambient
+aurora backdrop, and animated entrances. Cold emails can be drafted and sent inline from Jobs,
+Tracker, and ATS Detail via the AI **Email Composer** modal.
 
-Or start them separately:
+### Pages
 
-```bash
-# Terminal 1
-python dashboard/app.py
+| Page | What it shows |
+|------|---------------|
+| Overview `/` | Pipeline funnel · score distribution · work modes · cloud fit · scrape trend · top jobs |
+| Analytics `/analytics` | Skill demand · companies · cloud demand · locations · score trend · resume profile |
+| Jobs `/jobs` | Filterable leaderboard — score / mode / cloud fit / posted age / search / sort |
+| ATS Detail `/ats/:id` | Full breakdown: 11 sub-scores · predictions · skills · outreach playbook · send email |
+| Skills Gap `/skills-gap` | Gap skills frequency · keyword cloud · top resume changes |
+| Recruiters `/recruiters` | Directory with email, company, avg score, post count |
+| Tracker `/tracker` | Kanban: saved → applied → interviewing → offer/rejected |
+| Outreach `/outreach` | Sent-email history + recruiter-requested fields missing from candidate_info |
+| Raw Data `/raw-data` | Paginated browser of scraped posts (full post text, posted/scraped age) |
 
-# Terminal 2
-cd dashboard/frontend && npm run dev
-```
+---
 
-## Dashboard Pages
-
-| Page | URL | What it shows |
-|------|-----|---------------|
-| Overview | `/` | Pipeline funnel · avg ATS score · extraction rate · score distribution · top 8 jobs |
-| Job Leaderboard | `/leaderboard` | All scored jobs, filterable by score/mode/search, sortable |
-| ATS Detail | `/ats/:id` | Full breakdown for one job: 11 sub-scores · predictions · matched/gap skills · keyword injections · priority actions |
-| Skills Gap | `/skills-gap` | Gap skills frequency across all jobs · weaknesses · keyword cloud |
-| Recruiter Directory | `/recruiters` | All unique recruiters with email, company, post count, best score |
-| Raw Posts | `/raw-data` | Paginated browser of scraped LinkedIn posts with extraction status |
-
-## CLI Viewers (no dashboard needed)
+## CLI Inspection
 
 ```bash
-python view_jobs.py      # print all normalized_posts to terminal
-python view_scores.py    # print all ats_scores > 60 with full breakdown
+python scripts/view_jobs.py      # all normalized_posts
+python scripts/view_scores.py    # ats_scores > 60, sorted by score
 ```
+
+Re-score after editing your resume or the ATS prompt, then compare runs:
+
+```bash
+python scripts/rescore.py            # snapshot current scores → data/scores_history.json, rescore all
+python scripts/compare_scores.py     # diff the last two snapshots (which jobs moved up/down)
+```
+
+---
 
 ## Local NER Model (optional)
 
-After accumulating 50+ posts, you can train a local spaCy NER model to replace Gemini for the extraction stage (faster, free, offline):
+After accumulating posts, train a local spaCy NER model as extraction fallback:
 
 ```bash
-python model/train.py               # train with defaults
-python model/train.py --iters 40    # more iterations
+python model/train.py               # incremental (new posts only)
+python model/train.py --all         # retrain from scratch
 ```
 
-Then set `USE_LOCAL_MODEL = True` in `settings.py`. Gemini remains active as fallback when the local model can't find a job title.
+Set `USE_LOCAL_MODEL = True` in `settings.py`. Gemini remains active as fallback when the local model can't find a job title. Entities trained: `JOB_TITLE`, `COMPANY`, `SKILL`, `SUBJECT_FORMAT`.
+
+---
 
 ## Database
 
-`db/linkedin_scraper.db` — SQLite with WAL mode, 4 tables:
+`db/linkedin_scraper.db` — SQLite with WAL mode, 5 tables:
 
 ```
-raw_posts          UNIQUE(activity_urn)   verbatim post DOM, extraction lifecycle
-normalized_posts   FK → raw_posts         structured fields from Gemini extraction
-target_jobs        FK → normalized_posts  posts passing location + experience filter
-ats_scores         FK → target_jobs       full AI ATS evaluation
+raw_posts          UNIQUE(activity_urn)   verbatim post DOM · posted_at timestamp
+normalized_posts   FK → raw_posts         structured Gemini extraction · email fields
+target_jobs        FK → normalized_posts  posts passing all 4 filters · cloud_fit
+ats_scores         FK → target_jobs       full ATS evaluation (11 scores + predictions)
+job_tracker        FK → target_jobs       application tracker (dashboard only)
 ```
 
-```bash
-sqlite3 db/linkedin_scraper.db
-.tables
-SELECT extraction_status, COUNT(*) FROM raw_posts GROUP BY extraction_status;
-SELECT title, company, final_ats_score FROM normalized_posts JOIN target_jobs t ON t.norm_post_id = normalized_posts.id JOIN ats_scores s ON s.target_job_id = t.id ORDER BY final_ats_score DESC;
-```
+Key columns added beyond the base schema:
+
+| Table | Column | Purpose |
+|-------|--------|---------|
+| `raw_posts` | `posted_at` | Absolute timestamp from LinkedIn "X hours ago" |
+| `normalized_posts` | `email_subject_format` | Subject line format recruiter specified |
+| `normalized_posts` | `email_required_fields` | Fields recruiter explicitly asks for |
+| `target_jobs` | `clouds_required` | Detected cloud platforms (aws,gcp,azure) |
+| `target_jobs` | `cloud_fit` | `aws_match` / `no_cloud_req` / `other_cloud_only` |
+
+---
+
+## ATS Scoring Details
+
+**11 sub-scores (0–100):** keyword match · semantic alignment · technical skills · experience relevance · project alignment · impact · ATS structure · recruiter readability · seniority fit · domain fit · tailoring readiness
+
+**4 predictions (0–100%):** ATS pass · shortlist · interview · rejection probability
+
+**Insights:** matched skills · critical gap skills · resume strengths/weaknesses · priority changes · keyword injections
+
+**Model cascade** (best → fallback): `gemini-3.5-flash` → `gemini-2.5-flash` → `llama-4-scout` → `llama-3.3-70b` → `gemini-3.1-flash-lite` → `gemini-2.5-flash-lite` → `qwen3-32b` → `gemma-4-31b-it` → `gemma-4-26b-a4b-it` → `llama-3.1-8b`
+
+---
 
 ## Project Structure
 
 ```
 job-hunter-agent/
-├── main.py                        entry point — runs all 4 pipeline stages
-├── settings.py                    all config (credentials, search, filters, models)
-├── start_dashboard.sh             start Flask API + React dev server together
-├── requirements.txt               Python dependencies
+├── main.py                          entry point — runs all 4 pipeline stages
+├── settings.py                      all config (credentials, search, filters, models)
+├── start_dashboard.sh               start Flask API + React dev server together
 │
-├── scraper/
-│   ├── linkedin_scraper.py        Stage 1: Playwright-driven LinkedIn scraper
-│   ├── extractor.py               Stage 2: Gemini extraction worker (consumer thread)
-│   └── location_utils.py          regex helpers: location, experience, salary, email
-│
-├── ats/
-│   ├── filter.py                  Stage 3: location + experience filter → target_jobs
-│   └── scorer.py                  Stage 4: Gemini ATS scorer with model cascade
+├── pipeline/
+│   ├── scraper/
+│   │   ├── linkedin_scraper.py      Stage 1: Playwright scraper + posted_at extraction
+│   │   ├── extractor.py             Stage 2: Gemini extraction worker
+│   │   └── location_utils.py        regex helpers + foreign country detection
+│   ├── staging/
+│   │   ├── writer.py                StagingWriter: buffers posts → batch files
+│   │   └── processor.py             batch file consumer → DB; backfills posted_at on dedup
+│   ├── ats/
+│   │   ├── filter.py                Stage 3: 4 filters + cloud detection + foreign remote check
+│   │   └── scorer.py                Stage 4: 3-worker cascade scorer
+│   └── outreach/
+│       ├── builder.py               AI email generator (candidate_info + resume + post)
+│       └── sender.py                Gmail SMTP sender with resume attachment
 │
 ├── db/
-│   ├── schema.sql                 table definitions (4 tables)
-│   ├── database.py                all DB read/write functions
-│   └── linkedin_scraper.db        SQLite database
+│   ├── schema.sql                   table definitions
+│   ├── database.py                  all DB helpers + additive migrations
+│   └── linkedin_scraper.db          SQLite database (gitignored)
 │
 ├── dashboard/
-│   ├── app.py                     Flask API server (REST endpoints only)
-│   └── frontend/                  React + Vite SPA
-│       ├── index.html             Tailwind CDN + Google Fonts + Material Symbols
-│       ├── vite.config.js         Vite config with /api proxy to Flask
+│   ├── app.py                       Flask API (REST endpoints + job_tracker)
+│   └── frontend/                    React + Vite SPA
+│       ├── index.html               Tailwind CDN + theme tokens + glass/gradient styles
 │       ├── src/
-│       │   ├── main.jsx           React entry point
-│       │   ├── App.jsx            React Router setup
-│       │   ├── index.css          minimal global reset
+│       │   ├── App.jsx              Router + 10 routes
 │       │   ├── components/
-│       │   │   └── Layout.jsx     sidebar + header (shared shell)
-│       │   └── pages/
-│       │       ├── Overview.jsx
-│       │       ├── Leaderboard.jsx
-│       │       ├── AtsDetail.jsx
-│       │       ├── SkillsGap.jsx
-│       │       ├── Recruiters.jsx
-│       │       └── RawData.jsx
-│       └── package.json
+│       │   │   ├── Layout.jsx       glass sidebar + topbar + pipeline status
+│       │   │   ├── charts.jsx       dependency-free SVG charts
+│       │   │   ├── ui.jsx           shared UI components
+│       │   │   └── EmailComposer.jsx  AI email draft/edit/send modal
+│       │   └── pages/               Overview · Analytics · Jobs · Tracker · AtsDetail ·
+│       │                            SkillsGap · Recruiters · Outreach · RawData
+│       └── vite.config.js           /api proxy → Flask (+ polling watch for WSL HMR)
+│
+├── scripts/
+│   ├── send_outreach.py             Interactive email outreach CLI
+│   ├── rescore.py                   archive + clear + rescore all target_jobs
+│   ├── compare_scores.py            diff score snapshots in data/scores_history.json
+│   ├── view_jobs.py                 CLI: print all normalized_posts
+│   └── view_scores.py               CLI: print ats_scores > 60
 │
 ├── model/
-│   ├── train.py                   train spaCy NER on DB pairs (optional)
-│   ├── predict.py                 LocalExtractor class (drop-in for Gemini)
-│   └── linkedin_ner/              trained spaCy model artifacts
+│   ├── train.py                     spaCy NER trainer (incremental or full)
+│   ├── predict.py                   LocalExtractor class
+│   └── linkedin_ner/                trained model artifacts (gitignored)
 │
 ├── prompts/
-│   └── ats_prompt.txt             system prompt for the ATS scoring LLM call
-│
-├── resume/
-│   └── *.pdf / *.txt              your resume (scorer auto-detects)
+│   ├── ats_prompt.txt               ATS scoring system prompt
+│   └── email_builder_prompt.txt     Email generation prompt
 │
 ├── config/
-│   ├── linkedin_cookies.json      saved session (auto-created, gitignore this)
-│   └── resume.json                structured resume data (optional)
+│   ├── candidate_info.txt           Your personal details for email builder (gitignored)
+│   ├── candidate_info.example.txt   Template with dummy data (committed)
+│   └── linkedin_cookies.json        Saved session (gitignored)
 │
-└── view_jobs.py / view_scores.py  CLI inspection tools
+├── resume/
+│   └── *.pdf / *.txt                Your resume (gitignored; scorer + builder auto-detect)
+│
+└── data/                            Runtime data (gitignored)
+    ├── linkedin_scraper.db
+    ├── queue/raw/                   Live batch files (ephemeral)
+    ├── model_usage/                 Daily RPD counters
+    └── missing_fields.json          Fields recruiter asked for but not in candidate_info.txt
+
 ```
 
-## ATS Scoring Details
-
-The scorer sends each job's full post text + your resume to Gemini and receives:
-
-**11 sub-scores (0–100):** keyword match · semantic alignment · technical skills · experience relevance · project alignment · impact · ATS structure · recruiter readability · seniority fit · domain fit · tailoring readiness
-
-**4 predictions (0–100%):** ATS pass probability · shortlist probability · interview probability · rejection probability
-
-**Insights:** matched skills · critical gap skills · resume strengths/weaknesses · priority changes · keyword injections
-
-**Model cascade** (falls back on 429): `gemini-2.5-flash` → `gemini-3.5-flash` → `gemini-3.0-flash` → `gemini-2.5-flash-lite` → `gemma-4-31b-it`
+---
 
 ## Known Limitations
 
 - **Salary always null** — Indian recruiters almost never disclose salary in LinkedIn posts.
 - **Null company (~40%)** — recruiter works at a staffing firm and doesn't name the end client.
-- **Probability inconsistency** — Gemini sometimes returns probabilities as 0–1 or 0–100. `app.py` normalizes these automatically.
-- **LinkedIn Jobs tab** — `LINKEDIN_SCRAPE_JOBS = True` is a no-op; Jobs tab scraping is not yet wired to the DB pipeline.
+- **Probability format** — Gemini sometimes returns probabilities as 0–1 or 0–100. `app.py` normalizes automatically.
+- **LinkedIn Jobs tab** — `LINKEDIN_SCRAPE_JOBS = True` is wired but no-op; not connected to the DB pipeline yet.
+- **posted_at for old posts** — Posts scraped before `posted_at` was added have `NULL`; the outreach CLI falls back gracefully but they won't appear in time-filtered queries.

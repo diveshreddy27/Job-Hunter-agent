@@ -46,6 +46,14 @@ export default function Analytics() {
   }))
   const locations = (data.locations || []).map(l => ({ label: l.city, value: l.cnt }))
 
+  const CLOUD_COLOR = { aws: 'rgb(var(--warning))', azure: 'rgb(var(--info))', gcp: 'rgb(var(--danger))' }
+  const cloudDemand = Object.entries(data.cloud_demand || {})
+    .map(([k, v]) => ({ label: k.toUpperCase(), value: v, color: CLOUD_COLOR[k] }))
+    .sort((a, b) => b.value - a.value)
+  const modelUsage = (data.model_usage || []).map(m => ({
+    label: (m.model || 'unknown').split('/').pop(), value: m.cnt, sub: m.provider ? `· ${m.provider}` : '',
+  }))
+
   return (
     <>
       <PageHeader
@@ -66,6 +74,22 @@ export default function Analytics() {
           {companies.length
             ? <HBarList items={companies} color="rgb(var(--chart-4))" />
             : <EmptyState icon="apartment" title="No companies yet" />}
+        </Card>
+      </div>
+
+      {/* Cloud demand + scoring models */}
+      <div className="grid grid-cols-12 gap-5 mb-6">
+        <Card className="col-span-12 md:col-span-6" title="Cloud Platform Demand" icon="cloud"
+          action={<span className="text-[11px] text-faint font-mono">across targeted jobs</span>}>
+          {cloudDemand.length
+            ? <HBarList items={cloudDemand} showPct />
+            : <EmptyState icon="cloud_off" title="No cloud data yet" />}
+        </Card>
+        <Card className="col-span-12 md:col-span-6" title="Scoring Models Used" icon="smart_toy"
+          action={<span className="text-[11px] text-faint font-mono">cascade fallbacks</span>}>
+          {modelUsage.length
+            ? <HBarList items={modelUsage} color="rgb(var(--chart-3))" />
+            : <EmptyState icon="smart_toy" title="No scores yet" />}
         </Card>
       </div>
 

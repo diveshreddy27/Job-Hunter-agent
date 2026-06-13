@@ -15,6 +15,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/jobs',      icon: 'work',            label: 'Jobs' },
       { to: '/tracker',   icon: 'fact_check',      label: 'Application Tracker' },
+      { to: '/outreach',  icon: 'outgoing_mail',   label: 'Outreach' },
       { to: '/recruiters',icon: 'contact_page',    label: 'Recruiters' },
     ],
   },
@@ -84,14 +85,15 @@ export default function Layout({ children }) {
   return (
     <div className="overflow-x-hidden min-h-screen">
       {/* Sidebar */}
-      <aside className="bg-surface h-screen w-60 fixed left-0 top-0 overflow-y-auto custom-scrollbar flex flex-col border-r border-line z-50">
+      <aside className="h-screen w-64 fixed left-0 top-0 overflow-y-auto custom-scrollbar flex flex-col z-50
+        bg-surface/70 backdrop-blur-xl border-r border-line">
         <div className="px-5 py-6 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shadow-lg shadow-accent/30">
-            <span className="material-symbols-outlined text-accent-ink" style={{ fontVariationSettings: "'FILL' 1" }}>travel_explore</span>
+          <div className="w-11 h-11 rounded-2xl gradient-accent flex items-center justify-center glow-accent shrink-0">
+            <span className="material-symbols-outlined text-white text-[24px]" style={{ fontVariationSettings: "'FILL' 1" }}>travel_explore</span>
           </div>
           <div>
-            <h1 className="text-lg font-extrabold text-ink leading-6 tracking-tight">Job Hunter</h1>
-            <p className="text-[9px] uppercase tracking-[0.18em] text-faint font-bold">AI Career Intelligence</p>
+            <h1 className="text-[17px] font-extrabold leading-5 tracking-tight gradient-text">Job Hunter</h1>
+            <p className="text-[9px] uppercase tracking-[0.18em] text-faint font-bold mt-0.5">AI Career Intelligence</p>
           </div>
         </div>
 
@@ -106,15 +108,16 @@ export default function Layout({ children }) {
                     to={item.to}
                     end={item.to === '/'}
                     className={({ isActive }) =>
-                      'flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors ' +
+                      'group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all duration-200 ' +
                       (isActive
-                        ? 'bg-accent/12 text-accent font-semibold'
+                        ? 'bg-accent/12 text-accent font-semibold shadow-sm shadow-accent/10'
                         : 'text-muted hover:bg-surface-2 hover:text-ink')
                     }
                   >
                     {({ isActive }) => (
                       <>
-                        <span className="material-symbols-outlined text-[20px]"
+                        {isActive && <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-full gradient-accent" aria-hidden="true" />}
+                        <span className="material-symbols-outlined text-[20px] transition-transform group-hover:scale-110"
                           style={isActive ? { fontVariationSettings: "'FILL' 1" } : undefined}>{item.icon}</span>
                         {item.label}
                       </>
@@ -127,21 +130,24 @@ export default function Layout({ children }) {
         </nav>
 
         {/* Pipeline status panel */}
-        <div className="mx-3 mb-3 p-3.5 rounded-xl bg-surface-2 border border-line">
+        <div className="mx-3 mb-3 p-3.5 rounded-2xl bg-surface-2/70 border border-line backdrop-blur">
           <div className="flex items-center gap-2 mb-1.5">
-            <span className={`w-2 h-2 rounded-full ${running ? 'bg-warning animate-pulse' : 'bg-success'}`} />
+            <span className="relative flex h-2.5 w-2.5">
+              {running && <span className="absolute inline-flex h-full w-full rounded-full bg-warning opacity-60 animate-ping" />}
+              <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${running ? 'bg-warning' : 'bg-success'}`} />
+            </span>
             <p className="text-[11px] font-bold text-ink">{running ? 'Pipeline running…' : 'Agent idle'}</p>
           </div>
           <p className="text-[10px] text-muted leading-4">
             Last run: {pipeline?.last_run || '—'}
-            {backlog > 0 && <><br />{backlog} item{backlog > 1 ? 's' : ''} in backlog</>}
+            {backlog > 0 && <><br /><span className="text-warning font-semibold">{backlog} item{backlog > 1 ? 's' : ''}</span> in backlog</>}
           </p>
         </div>
 
         <div className="px-3 pb-5 border-t border-line pt-3">
           <button
             onClick={toggleTheme}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium text-muted hover:bg-surface-2 hover:text-ink transition-colors"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium text-muted hover:bg-surface-2 hover:text-ink transition-colors cursor-pointer"
           >
             <span className="material-symbols-outlined text-[20px]">{theme === 'dark' ? 'light_mode' : 'dark_mode'}</span>
             {theme === 'dark' ? 'Light mode' : 'Dark mode'}
@@ -150,34 +156,35 @@ export default function Layout({ children }) {
       </aside>
 
       {/* Top bar */}
-      <header className="flex justify-between items-center gap-4 ml-60 px-8 py-3.5 bg-bg/80 backdrop-blur border-b border-line sticky top-0 z-40">
-        <div className="relative w-full max-w-sm">
-          <span className="absolute inset-y-0 left-3 flex items-center text-faint pointer-events-none">
+      <header className="flex justify-between items-center gap-4 ml-64 px-8 py-3.5 bg-bg/70 backdrop-blur-xl border-b border-line/80 sticky top-0 z-40">
+        <div className="relative w-full max-w-sm group">
+          <span className="absolute inset-y-0 left-3 flex items-center text-faint pointer-events-none transition-colors group-focus-within:text-accent">
             <span className="material-symbols-outlined text-[19px]">search</span>
           </span>
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
             onKeyDown={handleSearch}
-            className="w-full bg-surface border border-line rounded-xl pl-10 pr-4 py-2 text-ink text-sm placeholder:text-faint focus:ring-2 focus:ring-accent/40 focus:border-accent outline-none"
+            className="w-full bg-surface/80 border border-line rounded-xl pl-10 pr-4 py-2 text-ink text-sm placeholder:text-faint focus:ring-2 focus:ring-accent/40 focus:border-accent outline-none transition-shadow focus:shadow-lg focus:shadow-accent/10"
             placeholder="Search jobs, companies, recruiters…  ⏎"
             type="text"
+            aria-label="Search jobs, companies, recruiters"
           />
         </div>
         <button
           onClick={runPipeline}
           disabled={running}
-          className="bg-accent text-accent-ink pl-4 pr-5 py-2 rounded-xl font-bold text-xs uppercase tracking-wide hover:brightness-110 active:scale-95 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2 shrink-0 shadow-lg shadow-accent/25"
+          className="gradient-accent text-white pl-4 pr-5 py-2 rounded-xl font-bold text-xs uppercase tracking-wide hover:brightness-110 active:scale-95 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2 shrink-0 glow-accent cursor-pointer"
         >
           {running
-            ? <span className="w-3.5 h-3.5 rounded-full border-2 border-accent-ink border-t-transparent animate-spin" />
-            : <span className="material-symbols-outlined text-[18px]">play_arrow</span>}
+            ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+            : <span className="material-symbols-outlined text-[18px]">bolt</span>}
           {running ? 'Running…' : 'Run Pipeline'}
         </button>
       </header>
 
       {/* Main content */}
-      <main className="ml-60 p-8 min-h-screen max-w-[1400px]">
+      <main className="ml-64 p-8 min-h-screen max-w-[1440px]">
         {children}
       </main>
     </div>
