@@ -23,7 +23,7 @@ import pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 
 from db import database as db
-from pipeline.scraper.location_utils import is_contract_role
+from pipeline.scraper.location_utils import is_contract_role, is_india_job
 import settings as cfg
 
 log = logging.getLogger("ats.filter")
@@ -81,18 +81,24 @@ def detect_clouds(text: str, skills: str = "") -> tuple:
     return clouds_required, cloud_fit
 
 
-def _location_ok(city: str, state: str, is_remote: int) -> bool:
+def _location_ok(city: str, state: str, is_remote: int, post_content: str = "") -> tuple:
     if cfg.ATS_INCLUDE_REMOTE and is_remote:
-        return True
+        # Remote is only valid when the post doesn't name a specific foreign country.
+        # is_india_job returns False when foreign countries are detected with no India signal.
+        location_hint = f"{city or ''} {state or ''}".strip()
+        if not is_india_job(post_content, location_hint):
+            return False, "remote but foreign country detected"
+        return True, None
     if not city and not state:
-        return cfg.ATS_INCLUDE_NULL_LOCATION
+        result = cfg.ATS_INCLUDE_NULL_LOCATION
+        return result, None
     if city:
         cities = {c.strip().lower() for c in city.split(",")}
         if cities & cfg.ATS_TARGET_CITIES:
-            return True
+            return True, None
     if state and state.lower() in cfg.ATS_TARGET_STATES:
-        return True
-    return False
+        return True, None
+    return False, f"location city={city}|state={state}"
 
 
 def _experience_ok(exp_min, exp_max) -> bool:
@@ -126,8 +132,12 @@ def run_filter() -> tuple[int, int]:
     for r in rows:
         reasons = []
 
-        if not _location_ok(r["location_city"], r["location_state"], r["is_remote"]):
-            reasons.append(f"location city={r['location_city']}|state={r['location_state']}")
+        loc_ok, loc_reason = _location_ok(
+            r["location_city"], r["location_state"],
+            r["is_remote"], r["post_content"] or "",
+        )
+        if not loc_ok:
+            reasons.append(loc_reason)
 
         if not _experience_ok(r["experience_min"], r["experience_max"]):
             reasons.append(f"exp={r['experience_min']}-{r['experience_max']}")

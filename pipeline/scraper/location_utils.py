@@ -238,6 +238,9 @@ _FOREIGN_HARD = (
     "usa only", "us only", "uk only", "canada only", "australia only",
     "singapore only", "must be in us", "must reside in",
     "h1b sponsorship", "h-1b sponsorship",
+    # Regional abbreviations GeoText doesn't resolve
+    "latam", "latin america", "mena region", "gcc region",
+    "apac region", "emea region",
 )
 
 
