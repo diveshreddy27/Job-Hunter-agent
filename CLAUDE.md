@@ -27,9 +27,10 @@ begins, so scoring happens in real-time as posts flow through the pipeline.
 **Email outreach** (separate CLI, not part of pipeline):
 ```
 scripts/send_outreach.py  →  filter by posted_at + cloud_fit + ATS score
-                          →  show full job details  →  y/n/q per job
+                          →  show full job details  →  y/n/q per job  (or --auto-send)
                           →  AI generates email (candidate_info.txt + resume + post)
                           →  Gmail SMTP send with resume attached
+                          →  logs to email_outreach + marks job_tracker 'applied'
 ```
 
 ---
@@ -68,9 +69,11 @@ python scripts/compare_scores.py             # diff last two snapshots
 python scripts/compare_scores.py --list      # list available snapshots
 
 # Email outreach CLI
-python scripts/send_outreach.py              # past 24h · aws_match · ATS ≥ 50
+python scripts/send_outreach.py              # past 24h · aws_match · ATS ≥ 50  (interactive y/n/q)
 python scripts/send_outreach.py --min-score 65
 python scripts/send_outreach.py --hours 48
+python scripts/send_outreach.py --min-score 0 --auto-send   # batch-send ALL matched jobs, no prompts
+# Every send (success or failure) is logged to email_outreach; tracker auto-marked 'applied'
 
 # Train local NER model
 python model/train.py                    # incremental — only new (is_trained='not_trained') posts
@@ -104,14 +107,19 @@ prompts/
 scripts/
   view_jobs.py                   CLI: print all normalized_posts to terminal
   view_scores.py                 CLI: print ats_scores > 60 with full breakdown
-  send_outreach.py               Interactive outreach CLI — filters by posted_at + cloud_fit +
-                                   ATS score; shows full job detail; y/n/q per job;
-                                   generates email via AI cascade + sends via Gmail SMTP
+  send_outreach.py               Outreach CLI — filters by posted_at + cloud_fit + ATS score;
+                                   shows full job detail; y/n/q per job OR --auto-send to batch;
+                                   generates email via AI cascade + sends via Gmail SMTP;
+                                   logs every send to email_outreach; marks tracker 'applied'
   rescore.py                     archive current scores → data/scores_history.json, clear
                                    ats_scores, re-run the scorer cascade on all target_jobs
                                    (use after editing the resume or ats_prompt.txt)
   compare_scores.py              diff two score snapshots in data/scores_history.json — shows
                                    which jobs moved up/down; --list to see available snapshots
+  adhoc/                         one-time / migration scripts — run manually when needed
+    backfill_country.py          back-fills location_country on existing target_jobs by calling
+                                   Gemini with a lightweight single-field prompt;
+                                   dry-run by default, --apply to write to DB
 
 pipeline/
   scraper/
@@ -239,10 +247,9 @@ utils/
 prompts/ats_prompt.txt           system prompt for the ATS scoring API call
 resume/                          drop resume here (.pdf or .txt) — scorer auto-detects
 config/
-  linkedin_cookies.json          saved LinkedIn session (auto-created; delete to force re-login)
-  resume.json                    structured resume (optional, unused by current pipeline)
-view_jobs.py                     CLI: print all normalized_posts to terminal
-view_scores.py                   CLI: print ats_scores > 60 with full breakdown
+  candidate_info.txt             [gitignored] flat key:value personal details for email builder
+  candidate_info.example.txt     committed template — copy → candidate_info.txt and fill in
+  linkedin_cookies.json          [gitignored] saved LinkedIn session (auto-created; delete to force re-login)
 ```
 
 ---
@@ -293,11 +300,12 @@ every `STAGING_BATCH_SIZE` (default 10) posts. Final flush on scraper exit.
 - Model: `GEMINI_EXTRACT_MODEL` (default `gemini-3.1-flash-lite`, 1000 RPD free tier)
 - Rate limit: `REQUEST_DELAY = 4.5s` between calls (15 RPM headroom)
 - RPD tracking: `ModelUsageTracker` skips model if daily quota hit
-- Returns structured JSON: title, company, location, experience, skills, recruiter email, apply info, **email_subject_format**, **email_required_fields**
+- Returns structured JSON: title, company, location, experience, skills, recruiter email, apply info, **email_subject_format**, **email_required_fields**, **location_country**
 - **Fix 1:** derives `location_state` from city via `INDIA_STATES` map when Gemini leaves state null
 - **Fix 2:** regex fallback for `experience_max` when Gemini returns only min
 - **email_subject_format:** exact subject line format recruiter specified (e.g. `Name | Role | Exp | CTC | NP`)
 - **email_required_fields:** comma-separated token list of fields recruiter explicitly requests — mapped to canonical tokens: `current_ctc`, `expected_ctc`, `notice_period`, `current_location`, `preferred_locations`, `experience`, `current_company`, `current_designation`, `open_to_relocation`, `pan_number`, `linkedin_url`, `github_url`, `availability`, `work_mode_preference`, `resume_link`
+- **location_country:** country the job targets ("India", "United States", etc.) — inferred from post content; "unknown"/null = ambiguous; used by Stage 3 as the primary foreign-post signal
 
 **Local NER fallback:**
 - When `USE_LOCAL_MODEL=True`, tries spaCy NER model first; falls back to Gemini if no title extracted
@@ -313,13 +321,26 @@ every `STAGING_BATCH_SIZE` (default 10) posts. Final flush on scraper exit.
 
 | # | Filter | Logic |
 |---|--------|-------|
-| 1 | **Location** | city in `ATS_TARGET_CITIES` OR state in `ATS_TARGET_STATES` OR (`is_remote=1` AND post is India/global — see below) OR (both null AND `ATS_INCLUDE_NULL_LOCATION=True`) |
+| 1 | **Location** | city in `ATS_TARGET_CITIES` OR state in `ATS_TARGET_STATES` OR (`is_remote=1` AND India/global — see below) OR (both null AND `ATS_INCLUDE_NULL_LOCATION=True` AND India/global) |
 | 2 | **Experience** | `exp_min ≤ ATS_CANDIDATE_EXP_MAX AND exp_max ≥ ATS_CANDIDATE_EXP_MIN` (or both null → pass) |
 | 3 | **Contract** | `role_type != 'contract'` AND `is_contract_role(post_content)` is False |
 | 4 | **Email** | `recruiter_email` is non-null (when `REQUIRE_EMAIL_FOR_INGESTION=True`) |
 
-**Foreign remote rejection (within filter 1):**
-When `is_remote=1`, also runs `is_india_job(post_content, location_hint)`. If it returns False (foreign country detected with no India signal), the post is rejected with reason `"remote but foreign country detected"`. Posts with no detectable country pass (global/ambiguous = keep). `_FOREIGN_HARD` covers regional abbreviations GeoText doesn't resolve: `latam`, `latin america`, `mena region`, `gcc region`, `apac region`, `emea region`.
+**Foreign post rejection (within filter 1 — two-layer check):**
+
+Layer 1 — extracted `location_country` (preferred, most accurate):
+- If `location_country` is set and not "India" / "unknown" → reject immediately with `"foreign country: {country}"`
+- If `location_country` is "India" → skip code-based check, go straight to city/state matching
+
+Layer 2 — code-based fallback (when `location_country` is null):
+- Applies to **both** `is_remote=1` posts **and** null city+state posts
+- Runs `is_india_job(post_content, location_hint)` — returns False when a foreign country is detected with no India signal
+- Remote post fails → `"remote but foreign country detected"`
+- Null-location post fails → `"null location but foreign country detected"`
+- Posts with no detectable country pass (global/ambiguous = keep)
+- `_FOREIGN_HARD` covers abbreviations GeoText can't resolve: `latam`, `latin america`, `mena region`, `gcc region`, `apac region`, `emea region`
+
+**Future:** once `location_country` is reliably populated for all posts (via the normal pipeline + `scripts/adhoc/backfill_country.py`), the code-based `is_india_job()` fallback can be removed.
 
 **Cloud detection (on passing posts):**
 `detect_clouds(post_content, skills)` scans for AWS/GCP/Azure keywords. Strips `#hashtags` before matching (recruiters add `#aws` for LinkedIn reach, not as job requirements). Sets:
@@ -431,13 +452,17 @@ Structured fields extracted by Gemini (or local NER). 1-to-1 FK to `raw_posts`.
 **All posts live here** — including ones filtered out in Stage 3.
 This is the training dataset for the local NER model.
 
-Key columns: `title`, `company`, `location_city`, `location_state`, `is_remote` (0/1),
-`work_mode` (remote/hybrid/onsite), `experience_min/max`, `skills` (CSV),
+Key columns: `title`, `company`, `location_city`, `location_state`, `location_country`,
+`is_remote` (0/1), `work_mode` (remote/hybrid/onsite), `experience_min/max`, `skills` (CSV),
 `recruiter_email/name/designation/current_company`, `apply_via`, `apply_url`,
 `email_subject_format` (recruiter's subject line template or null),
 `email_required_fields` (canonical token CSV of fields recruiter asked for, or null),
 `extracted_by` (gemini/local_ner), `created_at`,
 `is_trained` (`not_trained` → `trained` after NER training run).
+
+`location_country`: Gemini-extracted target country ("India", "United States", etc.) or null.
+Primary foreign-post signal in Stage 3 — takes priority over `is_india_job()` code detection.
+Back-fill existing target_jobs rows with `scripts/adhoc/backfill_country.py --apply`.
 
 ### `target_jobs`
 Posts that passed **all 4** Stage 3 filters + cloud detection. Bridge to `ats_scores`.
@@ -461,8 +486,9 @@ Columns: `target_job_id` (UNIQUE FK), `status` (saved|applied|interviewing|offer
 `notes`, `updated_at`.
 
 ### `email_outreach`
-Cold-email send log, written by `dashboard/app.py` on every send attempt (and surfaced by
-`/api/outreach` + the AtsDetail Outreach Playbook). Auto-created on startup.
+Cold-email send log — written by **both** `dashboard/app.py` (via `/api/jobs/<id>/send-email`)
+and `scripts/send_outreach.py` (CLI) on every send attempt. Surfaced by `/api/outreach` and
+the AtsDetail Outreach Playbook. Auto-created on startup.
 
 Columns: `target_job_id` (FK), `to_email`, `subject`, `body_text`, `sent_at`,
 `status` (sent|failed|pending), `error`, `model_used`.
@@ -518,23 +544,36 @@ Gemini remains active as fallback when local model returns no title.
 ## Email outreach lifecycle
 
 ```
-send_outreach.py
+send_outreach.py  [--min-score N] [--hours N] [--auto-send]
      │
-     ├── Query: posted_at >= now-24h AND cloud_fit='aws_match' AND ats_score >= 50
-     │          (posted_at = actual LinkedIn post time, not scrape time)
+     ├── Query: posted_at IS NOT NULL
+     │          AND posted_at >= now-Nh        ← strict: no COALESCE fallback to scored_at
+     │          AND cloud_fit='aws_match'
+     │          AND ats_score >= N
+     │          AND NOT already in email_outreach  ← never re-sends to same job
+     │          (dedup by recruiter email — highest score per recruiter)
      │
      ├── Display all job details (scores, predictions, recruiter, raw post, email hints)
      │
-     ├── y → build_email(job)
+     ├── y (or --auto-send) → build_email(job)
      │         reads candidate_info.txt (flat key:value, missing = "(not provided)")
      │         reads resume PDF/TXT from resume/
      │         fills [MY_INFO]/[MY_RESUME]/[RAW_POST] in email_builder_prompt.txt
-     │         calls Gemini cascade → {subject, body, missing_fields}
+     │         calls Gemini/Groq cascade → {subject, body, missing_fields}
      │         appends missing_fields → data/missing_fields.json (accumulates over time)
      │         → send_email(to, subject, body) via Gmail SMTP with resume attached
+     │         → INSERT INTO email_outreach (status='sent', model_used, subject, body)
+     │         → UPSERT job_tracker SET status='applied'
      │
      └── n / q → skip / quit
 ```
+
+`--auto-send` skips both the per-job y/n/q prompt and the email preview confirm — useful for
+batching all matched jobs in one go (e.g. `--min-score 0 --auto-send`).
+
+**Filter alignment with UI:** the `posted_within` filter in `dashboard/app.py` uses
+`r.posted_at IS NOT NULL AND r.posted_at >= datetime('now', ? || ' hours')`.
+`send_outreach.py` uses the same clause — counts shown in the UI and sent by the CLI will match.
 
 `data/missing_fields.json` tracks which fields recruiters asked for that weren't in
 `candidate_info.txt`. View via `/api/missing-fields` or directly. Fill them in over time.

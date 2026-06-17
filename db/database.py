@@ -51,12 +51,13 @@ def init_db() -> None:
             conn.execute("ALTER TABLE normalized_posts ADD COLUMN email_subject_format TEXT")
         if "email_required_fields" not in norm_v2:
             conn.execute("ALTER TABLE normalized_posts ADD COLUMN email_required_fields TEXT")
+        if "location_country" not in norm_v2:
+            conn.execute("ALTER TABLE normalized_posts ADD COLUMN location_country TEXT")
 
         rp_existing = {row[1] for row in conn.execute("PRAGMA table_info(raw_posts)")}
         if "posted_at" not in rp_existing:
             conn.execute("ALTER TABLE raw_posts ADD COLUMN posted_at TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_rp_posted_at ON raw_posts(posted_at)")
-
         tj_existing = {row[1] for row in conn.execute("PRAGMA table_info(target_jobs)")}
         if "clouds_required" not in tj_existing:
             conn.execute("ALTER TABLE target_jobs ADD COLUMN clouds_required TEXT NOT NULL DEFAULT ''")
@@ -239,7 +240,7 @@ def get_pending_raw_posts(limit: int = 5) -> list:
 # typo in the extractor doesn't silently write to a non-existent column.
 _NORM_COLS = (
     "title", "company",
-    "location_raw", "location_city", "location_state",
+    "location_raw", "location_city", "location_state", "location_country",
     "is_remote", "work_mode",
     "experience_min", "experience_max",
     "role_type",

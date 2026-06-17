@@ -81,17 +81,38 @@ def detect_clouds(text: str, skills: str = "") -> tuple:
     return clouds_required, cloud_fit
 
 
-def _location_ok(city: str, state: str, is_remote: int, post_content: str = "") -> tuple:
-    if cfg.ATS_INCLUDE_REMOTE and is_remote:
-        # Remote is only valid when the post doesn't name a specific foreign country.
-        # is_india_job returns False when foreign countries are detected with no India signal.
-        location_hint = f"{city or ''} {state or ''}".strip()
-        if not is_india_job(post_content, location_hint):
-            return False, "remote but foreign country detected"
-        return True, None
-    if not city and not state:
-        result = cfg.ATS_INCLUDE_NULL_LOCATION
-        return result, None
+def _location_ok(city: str, state: str, is_remote: int,
+                 post_content: str = "", country: str = None) -> tuple:
+    location_hint = f"{city or ''} {state or ''}".strip()
+
+    # Extracted country wins when present — no regex needed.
+    # "unknown" / null → fall through to code-based detection below.
+    if country and country.lower() not in ("unknown", ""):
+        if "india" not in country.lower():
+            return False, f"foreign country: {country}"
+        # Country is India — skip code-based checks, go straight to city/state match.
+        # (Remote India jobs still pass; city/state logic below applies.)
+        if cfg.ATS_INCLUDE_REMOTE and is_remote:
+            return True, None
+        if not city and not state:
+            return cfg.ATS_INCLUDE_NULL_LOCATION, None
+        # Fall through to city/state match.
+
+    else:
+        # No extracted country — use code-based detection as fallback.
+        # Applies to BOTH remote posts AND null-location posts so foreign posts
+        # like "H1B Transfer / United States" with is_remote=0 + null city don't slip through.
+        if cfg.ATS_INCLUDE_REMOTE and is_remote:
+            if not is_india_job(post_content, location_hint):
+                return False, "remote but foreign country detected"
+            return True, None
+        if not city and not state:
+            if not cfg.ATS_INCLUDE_NULL_LOCATION:
+                return False, None
+            if not is_india_job(post_content, location_hint):
+                return False, "null location but foreign country detected"
+            return True, None
+
     if city:
         cities = {c.strip().lower() for c in city.split(",")}
         if cities & cfg.ATS_TARGET_CITIES:
@@ -117,7 +138,7 @@ def run_filter() -> tuple[int, int]:
     with db.get_conn() as conn:
         rows = conn.execute("""
             SELECT n.id AS norm_id, n.raw_post_id,
-                   n.location_city, n.location_state, n.is_remote,
+                   n.location_city, n.location_state, n.location_country, n.is_remote,
                    n.experience_min, n.experience_max,
                    n.title, n.company, n.skills,
                    n.role_type, n.recruiter_email,
@@ -135,6 +156,7 @@ def run_filter() -> tuple[int, int]:
         loc_ok, loc_reason = _location_ok(
             r["location_city"], r["location_state"],
             r["is_remote"], r["post_content"] or "",
+            country=r["location_country"],
         )
         if not loc_ok:
             reasons.append(loc_reason)

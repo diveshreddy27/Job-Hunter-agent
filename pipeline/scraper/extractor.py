@@ -60,6 +60,7 @@ JSON schema:
   "company":                  "HIRING company name — NOT the recruiter's own employer",
   "location_city":            "primary city (e.g. Hyderabad)",
   "location_state":           "Indian state (e.g. Telangana)",
+  "location_country":         "country the job targets (e.g. India, United States) — infer from post content, null if ambiguous",
   "is_remote":                1 if remote/WFH else 0,
   "work_mode":                "remote" | "hybrid" | "onsite",
   "experience_min":           minimum years as number,

@@ -58,7 +58,7 @@ def section(label):
 
 def fetch_jobs(min_score: int, hours: int) -> list:
     with db.get_conn() as conn:
-        return [dict(r) for r in conn.execute("""
+        rows = [dict(r) for r in conn.execute("""
             SELECT
                 t.id AS target_id,
                 t.clouds_required, t.cloud_fit,
@@ -89,12 +89,25 @@ def fetch_jobs(min_score: int, hours: int) -> list:
             JOIN normalized_posts n ON n.id = t.norm_post_id
             JOIN raw_posts r        ON r.id = t.raw_post_id
             JOIN ats_scores s       ON s.target_job_id = t.id
+            LEFT JOIN email_outreach e ON e.target_job_id = t.id
             WHERE r.posted_at IS NOT NULL
               AND r.posted_at >= datetime('now', ? || ' hours')
               AND s.final_ats_score >= ?
               AND t.cloud_fit = 'aws_match'
+              AND e.id IS NULL
             ORDER BY r.posted_at DESC, s.final_ats_score DESC
         """, (f"-{hours}", min_score)).fetchall()]
+
+    # Dedup by recruiter email — keep highest-scoring job per recruiter
+    seen_emails: set = set()
+    deduped = []
+    for job in rows:
+        email = (job.get("recruiter_email") or "").strip().lower()
+        if not email or email not in seen_emails:
+            if email:
+                seen_emails.add(email)
+            deduped.append(job)
+    return deduped
 
 
 # ── display ───────────────────────────────────────────────────────────────────
@@ -188,7 +201,29 @@ def display(job: dict, idx: int, total: int):
 
 # ── send ──────────────────────────────────────────────────────────────────────
 
-def send(job: dict) -> bool:
+def _log_outreach(target_id: int, to_email: str, subject: str,
+                   body: str, model: str, status: str, error: str = None):
+    """Write to email_outreach and, on success, mark tracker applied."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with db.get_conn() as conn:
+        conn.execute("""
+            INSERT INTO email_outreach
+              (target_job_id, to_email, subject, body_text, sent_at, status, error, model_used)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (target_id, to_email, subject, body, now if status == "sent" else None,
+              status, error, model))
+        if status == "sent":
+            conn.execute("""
+                INSERT INTO job_tracker (target_job_id, status, notes, updated_at)
+                VALUES (?, 'applied', 'Auto-set after email sent via CLI', ?)
+                ON CONFLICT(target_job_id) DO UPDATE SET
+                    status     = 'applied',
+                    updated_at = excluded.updated_at
+            """, (target_id, now))
+
+
+def send(job: dict, auto: bool = False) -> bool:
     from pipeline.outreach.builder import build_email
     from pipeline.outreach.sender import send_email
 
@@ -197,6 +232,8 @@ def send(job: dict) -> bool:
         result = build_email(job)
     except Exception as e:
         print(f"  ✗  Email generation failed: {e}")
+        _log_outreach(job["target_id"], job["recruiter_email"] or "",
+                      "", "", "", "failed", str(e))
         return False
 
     print(f"\n  Subject : {result['subject']}")
@@ -209,10 +246,11 @@ def send(job: dict) -> bool:
     if result["body"].count("\n") > 12:
         print("    [...]")
 
-    confirm = input("\n  Confirm send? [y/n]: ").strip().lower()
-    if confirm != "y":
-        print("  Skipped — email not sent.")
-        return False
+    if not auto:
+        confirm = input("\n  Confirm send? [y/n]: ").strip().lower()
+        if confirm != "y":
+            print("  Skipped — email not sent.")
+            return False
 
     try:
         send_email(
@@ -220,9 +258,15 @@ def send(job: dict) -> bool:
             subject=result["subject"],
             body=result["body"],
         )
+        _log_outreach(job["target_id"], job["recruiter_email"],
+                      result["subject"], result["body"],
+                      result["model_used"], "sent")
         print(f"  ✓  Sent to {job['recruiter_email']}")
         return True
     except Exception as e:
+        _log_outreach(job["target_id"], job["recruiter_email"] or "",
+                      result["subject"], result["body"],
+                      result["model_used"], "failed", str(e))
         print(f"  ✗  Send failed: {e}")
         return False
 
@@ -231,8 +275,9 @@ def send(job: dict) -> bool:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--min-score", type=int, default=50, help="Minimum ATS score (default 50)")
-    parser.add_argument("--hours",     type=int, default=24, help="Lookback window in hours (default 24)")
+    parser.add_argument("--min-score",  type=int, default=50,    help="Minimum ATS score (default 50)")
+    parser.add_argument("--hours",      type=int, default=24,    help="Lookback window in hours (default 24)")
+    parser.add_argument("--auto-send",  action="store_true",     help="Skip y/n prompts — generate and send all matched jobs automatically")
     args = parser.parse_args()
 
     db.init_db()
@@ -243,11 +288,21 @@ def main():
         return
 
     print(f"\n  {len(jobs)} jobs matched  (ATS ≥ {args.min_score} | aws_match | past {args.hours}h)")
-    print("  Commands: y = send email   n = skip   q = quit\n")
+    if args.auto_send:
+        print("  AUTO-SEND mode — generating and sending all jobs\n")
+    else:
+        print("  Commands: y = send email   n = skip   q = quit\n")
 
     sent = skipped = 0
     for i, job in enumerate(jobs, 1):
         display(job, i, len(jobs))
+
+        if args.auto_send:
+            if send(job, auto=True):
+                sent += 1
+            else:
+                skipped += 1
+            continue
 
         while True:
             choice = input(f"\n  [{i}/{len(jobs)}] Send email to {job['recruiter_email'] or '—'}? [y/n/q]: ").strip().lower()
@@ -259,7 +314,7 @@ def main():
             print("\n  Quit.")
             break
         elif choice == "y":
-            if send(job):
+            if send(job, auto=False):
                 sent += 1
             else:
                 skipped += 1

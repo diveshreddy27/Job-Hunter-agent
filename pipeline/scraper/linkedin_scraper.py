@@ -192,9 +192,33 @@ def _human_delay(lo=1.5, hi=3.5):
 
 
 def _scroll_page(page, times=4):
+    """Scroll down to trigger LinkedIn's infinite-scroll content loader.
+
+    Strategy: move mouse to viewport center so wheel events land on the feed
+    container, then also force-scroll to the document bottom via JS to guarantee
+    the intersection-observer fires even if the container is nested.
+    """
+    vw = page.viewport_size or {"width": 1280, "height": 900}
+    cx, cy = vw["width"] // 2, vw["height"] // 2
+    try:
+        page.mouse.move(cx, cy)
+    except Exception:
+        pass
+
     for _ in range(times):
-        page.keyboard.press("End")
-        _human_delay(0.8, 1.8)
+        scroll_px = random.randint(800, 1400)
+        try:
+            page.mouse.wheel(0, scroll_px)
+        except Exception:
+            pass
+        time.sleep(random.uniform(0.5, 1.0))
+
+    # Force to true document bottom — triggers LinkedIn's intersection observer
+    try:
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    except Exception:
+        pass
+    time.sleep(random.uniform(2.0, 3.5))
 
 
 # ── Post-card helpers (verified against real DOM in debug_linkedin_posts) ─────
@@ -264,16 +288,16 @@ def _is_hiring_post(content: str) -> bool:
 
 
 def _click_see_more(card) -> None:
-    """Expand a truncated post so content_el returns the full body.
-    The toggle has class `feed-shared-inline-show-more-text__see-more-less-toggle`."""
+    """Expand a truncated post so content_el returns the full body."""
     try:
         btn = card.query_selector(
+            '[data-testid="expandable-text-button"], '
             ".feed-shared-inline-show-more-text__see-more-less-toggle, "
             "button.see-more"
         )
         if btn and btn.is_visible():
             btn.click()
-            _human_delay(0.3, 0.6)
+            _human_delay(0.6, 1.2)
     except Exception:
         pass
 
@@ -293,10 +317,14 @@ def _clean_post_text(s: str) -> str:
 
 
 def _extract_activity_urn(card) -> str:
-    """Find `urn:li:activity:NNN` on the card or any descendant.
-    Returns empty string if no activity URN is present."""
+    """Return a stable unique ID for this post card.
+
+    First tries the legacy URN attributes (urn:li:activity:NNN).
+    Falls back to the card's componentkey when LinkedIn's SDUI layout
+    is active (June 2025+) and URN attributes are absent from the DOM.
+    """
     try:
-        return card.evaluate("""el => {
+        result = card.evaluate("""el => {
             const attrs = ['data-urn', 'data-chameleon-result-urn', 'data-id'];
             const nodes = [el, ...el.querySelectorAll(
                 '[data-urn], [data-chameleon-result-urn], [data-id]')];
@@ -308,8 +336,19 @@ def _extract_activity_urn(card) -> str:
             }
             return '';
         }""")
+        if result:
+            return result
     except Exception:
-        return ""
+        pass
+    # SDUI fallback: strip "expanded" prefix + "FeedType_FLAGSHIP_SEARCH" suffix
+    try:
+        ck = card.get_attribute("componentkey") or ""
+        key = ck.replace("expanded", "").replace("FeedType_FLAGSHIP_SEARCH", "").strip()
+        if key:
+            return key
+    except Exception:
+        pass
+    return ""
 
 
 def _fill_and_submit(page, email: str, password: str) -> bool:
@@ -490,20 +529,41 @@ def _scrape_posts(
         page.goto(url, timeout=30000, wait_until="domcontentloaded")
         _human_delay(3.0, 4.0)
 
-        # Handle "Choose an account" redirect (content search requires re-auth)
+        # Handle login redirect — content search sometimes requires re-auth.
+        # Two sub-cases:
+        #   a) "Choose an account" picker  → click the right account button
+        #   b) Full login page             → fill email + password and submit
         if "uas/login" in page.url or "authwall" in page.url:
-            log.info("[linkedin] Account picker for content search — selecting scraping account")
+            # Sub-case (a): account picker
             email_prefix = cfg.SCRAPE_LINKEDIN_EMAIL.split("@")[0].lower()
             try:
                 btns = page.locator("button.member-profile-block").all()
-                clicked = False
-                for btn in btns:
-                    if email_prefix in btn.inner_text().lower():
-                        btn.click(); _human_delay(3.0, 4.0); clicked = True; break
-                if not clicked and btns:
-                    btns[0].click(); _human_delay(3.0, 4.0)
+                if btns:
+                    log.info("[linkedin] Account picker detected — selecting scraping account")
+                    clicked = False
+                    for btn in btns:
+                        if email_prefix in btn.inner_text().lower():
+                            btn.click(); _human_delay(3.0, 4.0); clicked = True; break
+                    if not clicked:
+                        btns[0].click(); _human_delay(3.0, 4.0)
             except Exception as e:
-                log.warning(f"[linkedin] Account click failed: {e}")
+                log.warning(f"[linkedin] Account picker click failed: {e}")
+
+            # Sub-case (b): still on login page → full re-login
+            if "uas/login" in page.url or "authwall" in page.url:
+                log.info("[linkedin] Full re-login required for content search")
+                try:
+                    _fill_and_submit(page, cfg.SCRAPE_LINKEDIN_EMAIL, cfg.SCRAPE_LINKEDIN_PASSWORD)
+                    _human_delay(4.0, 6.0)
+                    if _is_logged_in(page):
+                        log.info("[linkedin] Re-login successful — navigating back to search")
+                        _save_cookies(page.context)
+                        page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                        _human_delay(3.0, 4.0)
+                    else:
+                        log.warning("[linkedin] Re-login may have hit a checkpoint at: %s", page.url)
+                except Exception as e:
+                    log.warning(f"[linkedin] Re-login failed: {e}")
 
         # Password verification step (floe-profile checkpoint)
         if "floe-profile" in page.url or ("checkpoint" in page.url and "login" not in page.url):
@@ -518,14 +578,14 @@ def _scrape_posts(
             except Exception as e:
                 log.warning(f"[linkedin] Password fill failed: {e}")
 
-        # Click "Posts" filter if not already selected
-        try:
-            posts_btn = page.query_selector("button:has-text('Posts')")
-            if posts_btn:
-                posts_btn.click()
-                _human_delay(1.5, 2.5)
-        except Exception:
-            pass
+        # Quick session check — if redirected to login, cookies are expired
+        if any(p in page.url for p in ["/login", "/authwall", "/uas/", "/checkpoint"]):
+            log.error(
+                "[linkedin] Session cookie expired or invalid.\n"
+                "  → Open linkedin.com in Chrome, log in, then re-export cookies.\n"
+                "  → Delete %s and re-run to trigger fresh login.", COOKIE_FILE
+            )
+            return 0
 
         # Apply filters via UI — each filter is a 3-step interaction:
         #   1. open dropdown  2. select option (checkbox label)  3. click "Show results"
@@ -619,14 +679,18 @@ def _scrape_posts(
             filter_name="Sort by",
         )
 
-        # `div.occludable-update` is the canonical card on the content search page
-        # (verified via debug script). The other selectors are kept as fallbacks
-        # for cases where LinkedIn ships a layout change.
+        # Post card selectors — primary is the SDUI format (active Jun 2025+).
+        # Legacy class-based selectors kept as fallbacks in case LinkedIn
+        # partially rolls back or A/B tests the old layout.
         POST_CARD_SELS = [
+            # SDUI June 2025+ (primary)
+            'div[data-view-name="search-entity-result-universal-template"]',
+            'div[role="listitem"][componentkey*="FeedType_FLAGSHIP_SEARCH"]',
+            'div[data-view-name="search-content-type"]',
+            # Legacy fallbacks
             "div.occludable-update",
             "li.reusable-search__result-container",
             "div[data-chameleon-result-urn]",
-            "div.search-results__list li",
         ]
 
         seen_urns: set = set()
@@ -641,13 +705,25 @@ def _scrape_posts(
 
         for scroll_round in round_iter:
             _scroll_page(page, times=3)
-            _human_delay(1.5, 2.5)
+            _human_delay(4.0, 8.0)
 
             cards = []
             for sel in POST_CARD_SELS:
                 cards = page.query_selector_all(sel)
                 if cards:
                     break
+
+            if not cards:
+                try:
+                    debug_path = "/tmp/li_debug_empty_cards.png"
+                    page.screenshot(path=debug_path, full_page=True)
+                    log.warning("[linkedin] No cards found — debug screenshot saved to %s", debug_path)
+                    log.warning("[linkedin] Current URL: %s", page.url)
+                    content_snippet = page.content()[:2000]
+                    log.warning("[linkedin] Page content snippet:\n%s", content_snippet)
+                except Exception as e:
+                    log.debug("[linkedin] Could not save debug screenshot: %s", e)
+                break
 
             round_staged = 0
             for card in cards:
@@ -661,32 +737,77 @@ def _scrape_posts(
                         skipped["seen_this_run"] += 1
                         continue
                     seen_urns.add(urn)
+                    # Small per-card pacing — avoid processing cards in a tight loop
+                    time.sleep(random.uniform(0.3, 0.8))
 
-                    activity_id = urn.split(":")[-1]
-                    post_url = (
-                        f"https://www.linkedin.com/feed/update/"
-                        f"urn:li:activity:{activity_id}/"
-                    )
+                    # post_url: old URN format has a real URL; SDUI componentkey does not
+                    if urn.startswith("urn:li:activity:"):
+                        post_url = f"https://www.linkedin.com/feed/update/{urn}/"
+                    else:
+                        post_url = ""  # filled in below from profile URL
 
                     # 2. Expand truncated content
                     _click_see_more(card)
 
                     # 3. Author / recruiter DOM fields
-                    author_el = card.query_selector(
-                        ".update-components-actor__name, .feed-shared-actor__name, "
-                        "a[class*='actor'] span[aria-hidden='true'], "
-                        "span[class*='actor__name']"
+                    # SDUI DOM (Jun 2025): actor container is
+                    #   <div aria-label="Name  3rd+">
+                    #     <p><span>Name</span></p>              ← clean name
+                    #     <p><span>Headline text</span></p>     ← LinkedIn headline
+                    #     <p componentkey="UUID"><span>Xh •</span></p>  ← time (excluded)
+                    # For Premium/Verified/Hiring/Open-to-work profiles the aria-label
+                    # carries badge text ("Name  Premium Profile  3rd+") but the name
+                    # <p> always contains the clean name.
+                    author = ""
+                    author_headline = ""
+                    actor_container = card.query_selector(
+                        '[aria-label*=" 3rd"], [aria-label*=" 2nd"], [aria-label*=" 1st"]'
                     )
-                    author = _first_line(author_el.inner_text()) if author_el else ""
+                    if actor_container:
+                        # p:not([componentkey]) excludes the time <p> (UUID componentkey).
+                        # Filter out the "• 3rd+" connection-degree <p> (starts with "•").
+                        actor_ps = [
+                            (p, _first_line(p.inner_text()).strip())
+                            for p in actor_container.query_selector_all("p:not([componentkey])")
+                        ]
+                        actor_ps = [(p, t) for p, t in actor_ps if t and not t.startswith("•")]
+                        if actor_ps:
+                            author = actor_ps[0][1]
+                        if len(actor_ps) > 1:
+                            author_headline = _clean_headline(actor_ps[1][1])
 
-                    headline_el = card.query_selector(
-                        ".update-components-actor__description, "
-                        ".feed-shared-actor__description, "
-                        "span[class*='actor__description']"
-                    )
-                    author_headline = _clean_headline(
-                        _first_line(headline_el.inner_text()) if headline_el else ""
-                    )
+                    # Legacy / non-SDUI fallbacks for author name
+                    if not author:
+                        anon_el = card.query_selector('[data-anonymize="person-name"], [data-anonymize="name"]')
+                        if anon_el:
+                            author = _first_line(anon_el.inner_text())
+                    if not author:
+                        author_el = card.query_selector(
+                            '.artdeco-entity-lockup__title span[aria-hidden="true"], '
+                            '.update-components-actor__name span[aria-hidden="true"], '
+                            ".update-components-actor__name, .feed-shared-actor__name"
+                        )
+                        if author_el:
+                            author = _first_line(author_el.inner_text())
+
+                    # Legacy fallback for headline
+                    if not author_headline:
+                        headline_el = card.query_selector(
+                            ".update-components-actor__description, "
+                            ".feed-shared-actor__description"
+                        )
+                        if headline_el:
+                            author_headline = _clean_headline(_first_line(headline_el.inner_text()))
+                    if not author_headline:
+                        # Last resort: scan <p> elements, skip the author name and time
+                        author_lower = author.lower()
+                        for p in card.query_selector_all("p"):
+                            t = _first_line(p.inner_text())
+                            if (t and t.lower() != author_lower
+                                    and "•" not in t and len(t) > 5):
+                                author_headline = _clean_headline(t)
+                                if author_headline:
+                                    break
 
                     profile_el = card.query_selector(
                         "a[href*='/in/'].app-aware-link, a[href*='/in/']"
@@ -694,30 +815,59 @@ def _scrape_posts(
                     recruiter_li = profile_el.get_attribute("href") if profile_el else ""
                     if recruiter_li and "?" in recruiter_li:
                         recruiter_li = recruiter_li.split("?")[0]
+                    if not post_url:
+                        post_url = recruiter_li  # SDUI fallback
 
-                    # 3b. Post age — LinkedIn shows "X hours/days ago" in the
-                    #     actor sub-description. Convert to absolute posted_at so
-                    #     we can filter by actual post time, not scrape time.
+                    # 3b. Post age
+                    # SDUI DOM (Jun 2025): time lives in
+                    #   <p componentkey="<UUID>"> > <span>  →  "43m •" / "3h •" / "10h •"
+                    # componentkey on <p> is always a UUID; feed-commentary uses
+                    # "feed-commentary_..." prefix and is excluded by :not().
                     from datetime import timedelta
                     posted_at = None
+                    scrape_now = datetime.now(timezone.utc)
+
                     time_el = card.query_selector(
-                        "span.update-components-actor__sub-description, "
-                        "span[class*='actor__sub-description'], "
-                        ".feed-shared-actor__sub-description, "
-                        "a[class*='actor__sub-description-link'] span"
+                        "p[componentkey]:not([componentkey^='feed-']) > span"
                     )
                     if time_el:
-                        time_text = time_el.inner_text().strip()
-                        hours_ago = parse_posted_hours(time_text)
+                        hours_ago = parse_posted_hours(time_el.inner_text().strip())
                         if hours_ago is not None:
-                            scrape_now = datetime.now(timezone.utc)
                             posted_at = (scrape_now - timedelta(hours=hours_ago)).isoformat()
+
+                    # Fallback: <time datetime="ISO"> — kept for LinkedIn A/B variants
+                    if posted_at is None:
+                        time_tag = card.query_selector("time[datetime]")
+                        if time_tag:
+                            dt_attr = (time_tag.get_attribute("datetime") or "").strip()
+                            if dt_attr:
+                                try:
+                                    from datetime import datetime as _dt
+                                    if dt_attr.isdigit():
+                                        posted_at = _dt.fromtimestamp(
+                                            int(dt_attr) / 1000, tz=timezone.utc
+                                        ).isoformat()
+                                    else:
+                                        posted_at = _dt.fromisoformat(
+                                            dt_attr.replace("Z", "+00:00")
+                                        ).isoformat()
+                                except Exception:
+                                    pass
+
+                    if posted_at is None:
+                        log.debug("[linkedin] posted_at not found for urn=%s", urn[-12:])
 
                     # 4. Post content — skip only if truly empty
                     content_el = card.query_selector(
+                        # SDUI 2025 (primary)
+                        '[data-view-name="feed-full-update-body"] span[dir="ltr"], '
+                        '[data-view-name="feed-full-update-body"], '
+                        # existing selectors as fallback
+                        '[data-testid="expandable-text-box"], '
                         ".update-components-text, "
                         ".feed-shared-update-v2__description, "
-                        ".feed-shared-text, span[class*='break-words']"
+                        ".feed-shared-text, "
+                        "span[class*='break-words']"
                     )
                     raw_text = content_el.inner_text() if content_el else ""
                     content  = _clean_post_text(raw_text)
@@ -772,7 +922,13 @@ def _scrape_posts(
     except Exception as e:
         log.error("[linkedin] Posts scrape error: %s", e)
 
-    log.info("[linkedin] Posts done — staged=%d  skipped=%s", staged, skipped)
+    log.info(
+        "[linkedin] Session summary — staged: %d | skipped: no_urn=%d no_content=%d seen=%d",
+        staged,
+        skipped["no_urn"],
+        skipped["no_content"],
+        skipped.get("seen_this_run", 0),
+    )
     return staged
 
 

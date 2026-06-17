@@ -296,31 +296,40 @@ def extract_locations(text: str) -> dict:
 
 
 def parse_posted_hours(time_text: str) -> Optional[float]:
-    """Parse 'X minutes/hours/days/weeks ago' → float hours elapsed.
+    """Parse post-age text → float hours elapsed.
 
-    Returns None when the text can't be parsed — caller should treat
-    unknown age as within-range (don't drop it).
+    Handles both full words ('2 hours ago', '1 day ago') and
+    LinkedIn SDUI abbreviated format ('2h', '23h', '1d', '2w').
+    Returns None when unparseable — caller should not drop the post.
     """
     if not time_text:
         return None
     t = time_text.lower().strip()
+    # strip bullet / separator suffix: "2h • LinkedIn" → "2h"
+    t = re.sub(r'\s*[•·|].*$', '', t).strip()
+
     if any(p in t for p in ("just now", "moment", "few hour", "few minute", "today")):
         return 1.0
+
+    # Full-word format: "2 hours ago", "1 day ago", "3 weeks ago"
     m = re.search(r'(\d+)\s*(minute|hour|day|week|month)', t)
-    if not m:
-        return None
-    n = int(m.group(1))
-    unit = m.group(2)
-    if unit.startswith("minute"):
-        return n / 60.0
-    if unit.startswith("hour"):
-        return float(n)
-    if unit.startswith("day"):
-        return float(n * 24)
-    if unit.startswith("week"):
-        return float(n * 24 * 7)
-    if unit.startswith("month"):
-        return float(n * 24 * 30)
+    if m:
+        n, unit = int(m.group(1)), m.group(2)
+        if unit.startswith("minute"): return n / 60.0
+        if unit.startswith("hour"):   return float(n)
+        if unit.startswith("day"):    return float(n * 24)
+        if unit.startswith("week"):   return float(n * 24 * 7)
+        if unit.startswith("month"):  return float(n * 24 * 30)
+
+    # Abbreviated SDUI format: "2h", "23h", "1d", "2w", "30m"
+    m = re.match(r'^(\d+)\s*([mhdw])$', t)
+    if m:
+        n, unit = int(m.group(1)), m.group(2)
+        if unit == 'm': return n / 60.0
+        if unit == 'h': return float(n)
+        if unit == 'd': return float(n * 24)
+        if unit == 'w': return float(n * 24 * 7)
+
     return None
 
 
