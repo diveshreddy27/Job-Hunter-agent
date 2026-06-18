@@ -51,11 +51,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
     <style>
       :root {
-        --bg: 247 248 252;
+        --bg: 244 246 252;
         --surface: 255 255 255;
-        --surface-2: 243 245 250;
-        --surface-3: 226 231 240;
-        --line: 226 231 240;
+        --surface-2: 233 237 248;
+        --surface-3: 212 219 236;
+        --line: 200 208 228;
         --ink: 13 18 33;
         --muted: 90 102 124;
         --faint: 148 160 178;
@@ -84,9 +84,9 @@
       .dark {
         --bg: 6 9 20;
         --surface: 14 19 36;
-        --surface-2: 22 29 51;
-        --surface-3: 36 46 76;
-        --line: 32 42 70;
+        --surface-2: 26 35 62;
+        --surface-3: 46 60 100;
+        --line: 58 74 118;
         --ink: 233 238 248;
         --muted: 150 162 186;
         --faint: 98 112 140;
@@ -138,7 +138,7 @@
         background: rgb(var(--glass) / var(--glass-alpha));
         backdrop-filter: blur(14px) saturate(140%);
         -webkit-backdrop-filter: blur(14px) saturate(140%);
-        border: 1px solid rgb(var(--line) / 0.9);
+        border: 1px solid rgb(var(--line));
         box-shadow: var(--shadow);
         position: relative;
       }
@@ -161,6 +161,22 @@
       .ring-grad { border: 1px solid transparent; background:
         linear-gradient(rgb(var(--surface)), rgb(var(--surface))) padding-box,
         linear-gradient(120deg, rgb(var(--accent) / 0.6), rgb(var(--accent-2) / 0.5)) border-box; }
+
+      /* Interactive pill group container — visible border so toggle groups always read as controls */
+      .pill-group {
+        background: rgb(var(--surface-2));
+        border: 1.5px solid rgb(var(--line));
+        padding: 3px;
+        border-radius: 0.5rem;
+        display: inline-flex;
+        gap: 2px;
+      }
+      /* Bordered control — used for slider, refresh/reset buttons etc */
+      .ctrl-border {
+        border: 1.5px solid rgb(var(--line));
+        transition: border-color .18s ease;
+      }
+      .ctrl-border:hover { border-color: rgb(var(--accent) / 0.5); }
 
       .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
       .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }

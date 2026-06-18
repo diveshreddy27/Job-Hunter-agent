@@ -189,9 +189,11 @@ export function StatCardSkeleton() {
 }
 
 export const inputCls =
-  'bg-surface border border-line text-ink text-sm rounded-lg px-3 py-2 ' +
-  'placeholder:text-faint focus:ring-2 focus:ring-accent/40 focus:border-accent outline-none transition-colors'
+  'bg-surface border-2 border-line text-ink text-sm rounded-lg px-3 py-2 ' +
+  'placeholder:text-faint focus:ring-2 focus:ring-accent/40 focus:border-accent outline-none transition-colors ' +
+  'hover:border-surface-3'
 
 export const selectCls =
-  'bg-surface border border-line text-ink text-xs rounded-lg px-3 py-1.5 ' +
-  'focus:ring-2 focus:ring-accent/40 focus:border-accent outline-none cursor-pointer'
+  'bg-surface border-2 border-line text-ink text-xs rounded-lg px-3 py-1.5 ' +
+  'focus:ring-2 focus:ring-accent/40 focus:border-accent outline-none cursor-pointer ' +
+  'hover:border-surface-3 transition-colors'

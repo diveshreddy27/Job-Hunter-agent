@@ -14,7 +14,7 @@ const NAV_GROUPS = [
     label: 'Act',
     items: [
       { to: '/jobs',      icon: 'work',            label: 'Jobs' },
-      { to: '/tracker',   icon: 'fact_check',      label: 'Application Tracker' },
+      { to: '/applied',   icon: 'fact_check',      label: 'Applied Analysis' },
       { to: '/outreach',  icon: 'outgoing_mail',   label: 'Outreach' },
       { to: '/recruiters',icon: 'contact_page',    label: 'Recruiters' },
     ],
@@ -22,7 +22,8 @@ const NAV_GROUPS = [
   {
     label: 'Data',
     items: [
-      { to: '/raw-data',  icon: 'database',        label: 'Raw Posts' },
+      { to: '/profile-fields', icon: 'assignment_late', label: 'Profile Fields' },
+      { to: '/raw-data',       icon: 'database',         label: 'Raw Posts' },
     ],
   },
 ]

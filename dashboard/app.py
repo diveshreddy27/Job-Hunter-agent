@@ -26,7 +26,7 @@ _pipeline_proc = None
 # NER training state (in-process background thread)
 _ner_state = {"running": False, "last_run": None, "last_count": 0, "error": None}
 
-TRACKER_STATUSES = ["saved", "applied", "interviewing", "offer", "rejected"]
+TRACKER_STATUSES = ["saved", "applied", "assessment", "interviewing", "offer", "rejected"]
 
 
 def get_db():
@@ -228,12 +228,21 @@ def api_jobs():
                s.priority_changes, s.keyword_injections,
                s.seniority_fit_score, s.technical_skills_score,
                r.scraped_at, r.posted_at, r.post_url,
-               k.status AS tracker_status
+               k.status AS tracker_status,
+               COALESCE(eo.sent_count, 0) AS email_sent_count,
+               eo.last_sent_at AS email_last_sent_at
         FROM target_jobs t
         JOIN normalized_posts n ON n.id = t.norm_post_id
         JOIN raw_posts r        ON r.id = t.raw_post_id
         LEFT JOIN ats_scores s  ON s.target_job_id = t.id
         LEFT JOIN job_tracker k ON k.target_job_id = t.id
+        LEFT JOIN (
+            SELECT target_job_id,
+                   COUNT(*) AS sent_count,
+                   MAX(sent_at) AS last_sent_at
+            FROM email_outreach WHERE status = 'sent'
+            GROUP BY target_job_id
+        ) eo ON eo.target_job_id = t.id
         WHERE COALESCE(s.final_ats_score, 0) >= ?
     """
     params = [score_min]
@@ -800,11 +809,14 @@ def api_outreach():
         SELECT e.id, e.target_job_id, e.to_email, e.subject, e.sent_at,
                e.status, e.error, e.model_used,
                n.title, n.company, n.recruiter_name,
-               s.final_ats_score
+               s.final_ats_score,
+               k.status AS tracker_status, k.notes AS tracker_notes
         FROM email_outreach e
         LEFT JOIN target_jobs t      ON t.id = e.target_job_id
         LEFT JOIN normalized_posts n ON n.id = t.norm_post_id
         LEFT JOIN ats_scores s       ON s.target_job_id = t.id
+        LEFT JOIN job_tracker k      ON k.target_job_id = t.id
+        WHERE e.status != 'duplicate'
         ORDER BY e.id DESC
     """).fetchall()
 

@@ -89,12 +89,14 @@ def fetch_jobs(min_score: int, hours: int) -> list:
             JOIN normalized_posts n ON n.id = t.norm_post_id
             JOIN raw_posts r        ON r.id = t.raw_post_id
             JOIN ats_scores s       ON s.target_job_id = t.id
-            LEFT JOIN email_outreach e ON e.target_job_id = t.id
             WHERE r.posted_at IS NOT NULL
               AND r.posted_at >= datetime('now', ? || ' hours')
               AND s.final_ats_score >= ?
               AND t.cloud_fit = 'aws_match'
-              AND e.id IS NULL
+              AND t.id NOT IN (
+                  SELECT target_job_id FROM email_outreach
+                  WHERE status = 'sent'
+              )
             ORDER BY r.posted_at DESC, s.final_ats_score DESC
         """, (f"-{hours}", min_score)).fetchall()]
 
