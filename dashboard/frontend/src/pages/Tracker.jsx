@@ -3,6 +3,10 @@ import { Link } from 'react-router-dom'
 import EmailComposer from '../components/EmailComposer'
 import { PageHeader, ScoreChip, TRACKER_META, EmptyState, Loading, selectCls } from '../components/ui'
 
+function staggerDelay(i, step = 0.055, cap = 0.48) {
+  return `${Math.min(i * step, cap)}s`
+}
+
 const COLUMNS = ['saved', 'applied', 'interviewing', 'offer', 'rejected']
 
 export default function Tracker() {
@@ -60,21 +64,21 @@ export default function Tracker() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 items-start">
-          {COLUMNS.map(col => {
+          {COLUMNS.map((col, colIdx) => {
             const meta = TRACKER_META[col]
             const colItems = byStatus[col]
             return (
-              <div key={col} className="bg-surface-2/60 border border-line rounded-2xl p-3 min-h-[120px]">
+              <div key={col} className="bg-surface-2/60 border border-line rounded-2xl p-3 min-h-[120px] fade-up" style={{ animationDelay: staggerDelay(colIdx) }}>
                 <div className={`flex items-center gap-2 px-2 py-1.5 rounded-lg mb-3 ${meta.cls}`}>
                   <span className="material-symbols-outlined text-[16px]">{meta.icon}</span>
                   <span className="text-xs font-bold uppercase tracking-wide">{meta.label}</span>
                   <span className="ml-auto text-xs font-mono font-bold">{colItems.length}</span>
                 </div>
                 <div className="space-y-3">
-                  {colItems.map(item => {
+                  {colItems.map((item, itemIdx) => {
                     const editing = item.target_job_id in notesDraft
                     return (
-                      <div key={item.target_job_id} className="card rounded-xl p-3.5 space-y-2.5">
+                      <div key={item.target_job_id} className="card rounded-xl p-3.5 space-y-2.5 card-hover group pop-in" style={{ animationDelay: staggerDelay(itemIdx, 0.045, 0.36) }}>
                         <div className="flex items-start gap-2.5">
                           <ScoreChip score={item.final_ats_score} />
                           <div className="min-w-0">

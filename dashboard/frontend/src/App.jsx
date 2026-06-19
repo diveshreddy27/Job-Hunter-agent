@@ -10,6 +10,7 @@ import Recruiters from './pages/Recruiters'
 import Outreach from './pages/Outreach'
 import ProfileFields from './pages/ProfileFields'
 import RawData from './pages/RawData'
+import Pipeline from './pages/Pipeline'
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="/outreach" element={<Outreach />} />
           <Route path="/profile-fields" element={<ProfileFields />} />
           <Route path="/raw-data" element={<RawData />} />
+          <Route path="/pipeline" element={<Pipeline />} />
         </Routes>
       </Layout>
     </BrowserRouter>

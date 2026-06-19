@@ -1,8 +1,32 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ScoreRing, scoreColor, GrowBar } from '../components/charts'
 import EmailComposer from '../components/EmailComposer'
 import { Card, TRACKER_META, CloudFitPill, CloudChips, relativeTime, EmptyState, Loading, selectCls } from '../components/ui'
+
+function useCountUp(target, duration = 750) {
+  const [val, setVal] = useState(0)
+  const raf = useRef(null)
+  useEffect(() => {
+    const n = Number(target)
+    if (!n) { setVal(0); return }
+    let start = null
+    const tick = (ts) => {
+      if (!start) start = ts
+      const p = Math.min((ts - start) / duration, 1)
+      const eased = 1 - Math.pow(1 - p, 3)
+      setVal(Math.round(eased * n))
+      if (p < 1) raf.current = requestAnimationFrame(tick)
+    }
+    raf.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf.current)
+  }, [target, duration])
+  return val
+}
+
+function staggerDelay(i, step = 0.055, cap = 0.48) {
+  return `${Math.min(i * step, cap)}s`
+}
 
 const SUB_SCORES = [
   ['keyword_match_score', 'Keyword Match'],
@@ -53,6 +77,9 @@ export default function AtsDetail() {
     })
     setJob(j => ({ ...j, tracker_status: status }))
   }
+
+  // Must be before early returns — hooks cannot be called conditionally
+  const countedScore = useCountUp(job?.final_ats_score ?? 0)
 
   function copyKeywords() {
     navigator.clipboard.writeText((job.keyword_injections || []).join(', '))
@@ -129,21 +156,21 @@ export default function AtsDetail() {
 
       {/* Score hero + breakdown + predictions */}
       <div className="grid grid-cols-12 gap-5 mb-6">
-        <div className="card rounded-2xl col-span-12 md:col-span-3 p-6 flex flex-col items-center justify-center text-center gap-4">
-          <ScoreRing score={sc} size={150} />
-          <span className="text-xs font-bold px-3 py-1 rounded-full"
+        <div className="card rounded-2xl col-span-12 md:col-span-3 p-6 flex flex-col items-center justify-center text-center gap-4 fade-up fade-up-1">
+          <ScoreRing score={countedScore} size={150} />
+          <span className="text-xs font-bold px-3 py-1 rounded-full score-in"
             style={{ background: `color-mix(in srgb, ${scoreColor(sc)} 15%, transparent)`, color: scoreColor(sc) }}>
             {scoreLabel(sc)}
           </span>
         </div>
 
-        <Card className="col-span-12 md:col-span-5" title="Score Breakdown" icon="bar_chart">
+        <Card className="col-span-12 md:col-span-5 fade-up fade-up-2" title="Score Breakdown" icon="bar_chart">
           <div className="space-y-2.5">
-            {SUB_SCORES.map(([key, label]) => {
+            {SUB_SCORES.map(([key, label], i) => {
               const v = job[key]
               if (v == null) return null
               return (
-                <div key={key}>
+                <div key={key} className="fade-up" style={{ animationDelay: staggerDelay(i, 0.035, 0.38) }}>
                   <div className="flex justify-between mb-1">
                     <span className="text-xs text-ink font-medium">{label}</span>
                     <span className="text-xs font-mono font-semibold" style={{ color: scoreColor(v) }}>{v}</span>
@@ -157,7 +184,7 @@ export default function AtsDetail() {
           </div>
         </Card>
 
-        <Card className="col-span-12 md:col-span-4" title="Predictions" icon="online_prediction">
+        <Card className="col-span-12 md:col-span-4 fade-up fade-up-3" title="Predictions" icon="online_prediction">
           <div className="space-y-3.5">
             {PROBS.map(([label, val, c]) => (
               <div key={label}>
@@ -186,20 +213,22 @@ export default function AtsDetail() {
 
       {/* Skills */}
       <div className="grid grid-cols-12 gap-5 mb-6">
-        <Card className="col-span-12 md:col-span-6" title="Matched Skills" icon="check_circle">
+        <Card className="col-span-12 md:col-span-6 fade-up" style={{ animationDelay: '0.25s' }} title="Matched Skills" icon="check_circle">
           <div className="flex flex-wrap gap-2">
             {(job.matched_skills || []).length
-              ? job.matched_skills.map(s => (
-                  <span key={s} className="px-3 py-1 bg-success/10 text-success rounded-full text-xs font-mono font-medium">{s}</span>
+              ? job.matched_skills.map((s, i) => (
+                  <span key={s} className="px-3 py-1 bg-success/10 text-success rounded-full text-xs font-mono font-medium pop-in"
+                    style={{ animationDelay: staggerDelay(i, 0.04, 0.4) }}>{s}</span>
                 ))
               : <span className="text-faint text-xs">None identified</span>}
           </div>
         </Card>
-        <Card className="col-span-12 md:col-span-6" title="Critical Gaps" icon="cancel">
+        <Card className="col-span-12 md:col-span-6 fade-up" style={{ animationDelay: '0.3s' }} title="Critical Gaps" icon="cancel">
           <div className="flex flex-wrap gap-2">
             {(job.critical_gap_skills || []).length
-              ? job.critical_gap_skills.map(s => (
-                  <span key={s} className="px-3 py-1 bg-danger/10 text-danger rounded-full text-xs font-mono font-medium">{s}</span>
+              ? job.critical_gap_skills.map((s, i) => (
+                  <span key={s} className="px-3 py-1 bg-danger/10 text-danger rounded-full text-xs font-mono font-medium pop-in"
+                    style={{ animationDelay: staggerDelay(i, 0.04, 0.4) }}>{s}</span>
                 ))
               : <span className="text-faint text-xs">No critical gaps identified</span>}
           </div>
@@ -208,7 +237,7 @@ export default function AtsDetail() {
 
       {/* Actions + strengths + weaknesses */}
       <div className="grid grid-cols-12 gap-5 mb-6">
-        <Card className="col-span-12 lg:col-span-4" title="Priority Actions" icon="task_alt">
+        <Card className="col-span-12 lg:col-span-4 fade-up" style={{ animationDelay: '0.35s' }} title="Priority Actions" icon="task_alt">
           <div className="space-y-2.5">
             {(job.priority_changes || []).map((a, i) => (
               <div key={i} className="flex gap-3 p-3 bg-surface-2 rounded-xl">
@@ -219,7 +248,7 @@ export default function AtsDetail() {
             {!(job.priority_changes || []).length && <span className="text-faint text-xs">No recommendations</span>}
           </div>
         </Card>
-        <Card className="col-span-12 lg:col-span-4" title="Resume Strengths" icon="stars">
+        <Card className="col-span-12 lg:col-span-4 fade-up" style={{ animationDelay: '0.4s' }} title="Resume Strengths" icon="stars">
           <ul className="space-y-2">
             {(job.resume_strengths || []).map((s, i) => (
               <li key={i} className="flex items-start gap-2 text-[13px] text-ink leading-5">
@@ -228,7 +257,7 @@ export default function AtsDetail() {
             ))}
           </ul>
         </Card>
-        <Card className="col-span-12 lg:col-span-4" title="Weaknesses" icon="warning">
+        <Card className="col-span-12 lg:col-span-4 fade-up" style={{ animationDelay: '0.45s' }} title="Weaknesses" icon="warning">
           <ul className="space-y-2">
             {(job.resume_weaknesses || []).map((s, i) => (
               <li key={i} className="flex items-start gap-2 text-[13px] text-ink leading-5">
@@ -240,7 +269,7 @@ export default function AtsDetail() {
       </div>
 
       {/* Keyword injections */}
-      <Card className="mb-6" title="Keyword Injections" icon="key"
+      <Card className="mb-6 fade-up" style={{ animationDelay: '0.5s' }} title="Keyword Injections" icon="key"
         action={
           <button onClick={copyKeywords}
             className="border border-accent text-accent px-3.5 py-1.5 rounded-lg text-xs font-semibold hover:bg-accent/10 transition-colors">
@@ -248,8 +277,9 @@ export default function AtsDetail() {
           </button>
         }>
         <div className="flex flex-wrap gap-2">
-          {(job.keyword_injections || []).map(k => (
-            <span key={k} className="px-3 py-1.5 bg-accent/10 text-accent rounded-full text-xs font-mono font-medium">{k}</span>
+          {(job.keyword_injections || []).map((k, i) => (
+            <span key={k} className="px-3 py-1.5 bg-accent/10 text-accent rounded-full text-xs font-mono font-medium pop-in"
+              style={{ animationDelay: staggerDelay(i, 0.04, 0.4) }}>{k}</span>
           ))}
           {!(job.keyword_injections || []).length && <span className="text-faint text-xs">None suggested</span>}
         </div>

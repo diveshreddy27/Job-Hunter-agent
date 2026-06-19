@@ -36,22 +36,25 @@ export function Card({ className = '', children, title, icon, action, hover = fa
 
 export function StatCard({ icon, label, value, sub, tone = 'accent' }) {
   const tones = {
-    accent:  { text: 'text-accent',  glow: 'rgb(var(--accent) / 0.18)' },
-    success: { text: 'text-success', glow: 'rgb(var(--success) / 0.18)' },
-    warning: { text: 'text-warning', glow: 'rgb(var(--warning) / 0.18)' },
-    danger:  { text: 'text-danger',  glow: 'rgb(var(--danger) / 0.18)' },
-    info:    { text: 'text-info',    glow: 'rgb(var(--info) / 0.18)' },
+    accent:  { text: 'text-accent',  glow: 'rgb(var(--accent) / 0.22)',  glowStrong: 'rgb(var(--accent) / 0.5)' },
+    success: { text: 'text-success', glow: 'rgb(var(--success) / 0.22)', glowStrong: 'rgb(var(--success) / 0.5)' },
+    warning: { text: 'text-warning', glow: 'rgb(var(--warning) / 0.22)', glowStrong: 'rgb(var(--warning) / 0.5)' },
+    danger:  { text: 'text-danger',  glow: 'rgb(var(--danger) / 0.22)',  glowStrong: 'rgb(var(--danger) / 0.5)' },
+    info:    { text: 'text-info',    glow: 'rgb(var(--info) / 0.22)',    glowStrong: 'rgb(var(--info) / 0.5)' },
   }
   const t = tones[tone] || tones.accent
   return (
     <div className="card card-hover rounded-2xl p-5 flex items-center gap-4 overflow-hidden">
       <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${t.text}`}
-        style={{ background: `radial-gradient(circle at 30% 25%, ${t.glow}, rgb(var(--surface-2)))`, boxShadow: `0 6px 18px -8px ${t.glow}` }}>
-        <span className="material-symbols-outlined text-[24px]">{icon}</span>
+        style={{
+          background: `radial-gradient(circle at 30% 25%, ${t.glow}, rgb(var(--surface-2) / 0.8))`,
+          boxShadow: `0 0 0 1px ${t.glow}, 0 6px 20px -6px ${t.glowStrong}`,
+        }}>
+        <span className="material-symbols-outlined text-[24px]" style={{ fontVariationSettings: "'FILL' 1" }}>{icon}</span>
       </div>
       <div className="min-w-0">
-        <p className="text-[11px] text-muted uppercase tracking-wider font-semibold truncate">{label}</p>
-        <p className="text-[27px] font-extrabold text-ink leading-8 tracking-tight">{value}</p>
+        <p className="text-[10px] text-muted uppercase tracking-[0.12em] font-bold truncate">{label}</p>
+        <p className="text-[28px] font-extrabold text-ink leading-8 tracking-tight">{value}</p>
         {sub && <p className="text-[11px] text-faint truncate">{sub}</p>}
       </div>
     </div>
@@ -63,7 +66,11 @@ export function ScoreChip({ score, size = 'md' }) {
   const dim = size === 'lg' ? 'w-11 h-11 text-sm' : 'w-9 h-9 text-xs'
   return (
     <div className={`${dim} rounded-full flex items-center justify-center font-bold shrink-0 relative`}
-      style={{ color: c, background: `conic-gradient(${c} ${(score ?? 0) * 3.6}deg, rgb(var(--surface-2)) 0deg)` }}>
+      style={{
+        color: c,
+        background: `conic-gradient(${c} ${(score ?? 0) * 3.6}deg, rgb(var(--surface-2)) 0deg)`,
+        boxShadow: score != null ? `0 0 10px -2px ${c}55` : 'none',
+      }}>
       <span className="absolute inset-[2.5px] rounded-full bg-surface flex items-center justify-center">{score ?? '—'}</span>
     </div>
   )
@@ -189,11 +196,12 @@ export function StatCardSkeleton() {
 }
 
 export const inputCls =
-  'bg-surface border-2 border-line text-ink text-sm rounded-lg px-3 py-2 ' +
-  'placeholder:text-faint focus:ring-2 focus:ring-accent/40 focus:border-accent outline-none transition-colors ' +
-  'hover:border-surface-3'
+  'bg-surface/80 border border-line/70 text-ink text-sm rounded-xl px-3 py-2 ' +
+  'placeholder:text-faint focus:ring-2 focus:ring-accent/30 focus:border-accent/60 outline-none ' +
+  'transition-all duration-200 hover:border-accent/30 focus:shadow-md focus:shadow-accent/10 ' +
+  'backdrop-blur-sm'
 
 export const selectCls =
-  'bg-surface border-2 border-line text-ink text-xs rounded-lg px-3 py-1.5 ' +
-  'focus:ring-2 focus:ring-accent/40 focus:border-accent outline-none cursor-pointer ' +
-  'hover:border-surface-3 transition-colors'
+  'bg-surface/80 border border-line/70 text-ink text-xs rounded-xl px-3 py-1.5 ' +
+  'focus:ring-2 focus:ring-accent/30 focus:border-accent/60 outline-none cursor-pointer ' +
+  'hover:border-accent/30 transition-all duration-200 backdrop-blur-sm'

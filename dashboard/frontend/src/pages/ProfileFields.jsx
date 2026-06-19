@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { PageHeader, StatCard, EmptyState, Loading } from '../components/ui'
 
+function staggerDelay(i, step = 0.055, cap = 0.48) {
+  return `${Math.min(i * step, cap)}s`
+}
+
 export default function ProfileFields() {
   const [data, setData] = useState(null)
 
@@ -28,12 +32,12 @@ export default function ProfileFields() {
       />
 
       <div className="grid grid-cols-2 xl:grid-cols-3 gap-5 mb-6">
-        <StatCard icon="assignment_late" label="Missing Fields"    value={data.total_unique ?? 0} tone="warning" />
-        <StatCard icon="priority_high"   label="High Priority"     value={fields.filter(([, v]) => PRIORITY(v.count) === 'high').length}   tone="danger"  />
-        <StatCard icon="check_circle"    label="Covered Fields"    value="—" tone="success" />
+        <div className="fade-up fade-up-1"><StatCard icon="assignment_late" label="Missing Fields"    value={data.total_unique ?? 0} tone="warning" /></div>
+        <div className="fade-up fade-up-2"><StatCard icon="priority_high"   label="High Priority"     value={fields.filter(([, v]) => PRIORITY(v.count) === 'high').length}   tone="danger"  /></div>
+        <div className="fade-up fade-up-3"><StatCard icon="check_circle"    label="Covered Fields"    value="—" tone="success" /></div>
       </div>
 
-      <div className="card rounded-2xl overflow-hidden">
+      <div className="card rounded-2xl overflow-hidden fade-up fade-up-4">
         <div className="px-6 pt-5 pb-3 border-b border-line flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-[20px] text-accent">assignment_late</span>
@@ -49,12 +53,12 @@ export default function ProfileFields() {
             hint="Your candidate_info.txt covers every field recruiters have asked for." />
         ) : (
           <div className="p-6 space-y-3">
-            {fields.map(([field, info]) => {
+            {fields.map(([field, info], i) => {
               const pct  = maxCount ? Math.round(info.count / maxCount * 100) : 0
               const prio = PRIORITY(info.count)
               const ps   = PRIORITY_STYLE[prio]
               return (
-                <div key={field} className="flex items-center gap-4 group">
+                <div key={field} className="flex items-center gap-4 group fade-up" style={{ animationDelay: staggerDelay(i, 0.05, 0.45) }}>
                   {/* Field name */}
                   <div className="w-48 flex-shrink-0">
                     <p className="text-[12px] font-semibold text-ink capitalize leading-tight">
@@ -75,7 +79,8 @@ export default function ProfileFields() {
                   </span>
 
                   {/* Priority badge */}
-                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide flex-shrink-0 w-16 text-center ${ps.cls}`}>
+                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide flex-shrink-0 w-16 text-center pop-in ${ps.cls}`}
+                    style={{ animationDelay: staggerDelay(i, 0.05, 0.45) }}>
                     {ps.label}
                   </span>
                 </div>

@@ -51,16 +51,16 @@
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
     <style>
       :root {
-        --bg: 244 246 252;
+        --bg: 242 244 252;
         --surface: 255 255 255;
-        --surface-2: 233 237 248;
-        --surface-3: 212 219 236;
-        --line: 200 208 228;
-        --ink: 13 18 33;
-        --muted: 90 102 124;
-        --faint: 148 160 178;
+        --surface-2: 231 235 250;
+        --surface-3: 210 217 240;
+        --line: 196 206 232;
+        --ink: 10 12 28;
+        --muted: 80 92 120;
+        --faint: 140 154 178;
         --accent: 99 91 255;
-        --accent-2: 168 85 247;
+        --accent-2: 180 90 255;
         --accent-ink: 255 255 255;
         --success: 16 152 84;
         --warning: 202 110 8;
@@ -73,96 +73,150 @@
         --chart-5: 236 72 153;
         --chart-6: 148 163 184;
         --glass: 255 255 255;
-        --glass-alpha: 0.72;
-        --shadow: 0 1px 2px rgb(15 23 42 / 0.05), 0 8px 24px -8px rgb(15 23 42 / 0.10);
-        --shadow-lg: 0 4px 12px -2px rgb(15 23 42 / 0.08), 0 20px 48px -12px rgb(15 23 42 / 0.16);
-        --glow: 0 0 0 1px rgb(var(--accent) / 0.0);
+        --glass-alpha: 0.78;
+        --shadow: 0 1px 3px rgb(15 23 42 / 0.06), 0 8px 28px -8px rgb(15 23 42 / 0.12);
+        --shadow-lg: 0 4px 16px -2px rgb(15 23 42 / 0.10), 0 24px 56px -12px rgb(15 23 42 / 0.18);
+        --shadow-accent: 0 8px 32px -8px rgb(var(--accent) / 0.35);
         --aurora-1: 99 91 255;
-        --aurora-2: 168 85 247;
+        --aurora-2: 180 90 255;
         --aurora-3: 14 165 233;
+        --aurora-4: 16 185 129;
       }
       .dark {
-        --bg: 6 9 20;
-        --surface: 14 19 36;
-        --surface-2: 26 35 62;
-        --surface-3: 46 60 100;
-        --line: 58 74 118;
-        --ink: 233 238 248;
-        --muted: 150 162 186;
-        --faint: 98 112 140;
-        --accent: 139 130 255;
-        --accent-2: 192 132 252;
-        --accent-ink: 9 12 24;
+        --bg: 3 4 14;
+        --surface: 8 11 26;
+        --surface-2: 14 18 42;
+        --surface-3: 24 30 68;
+        --line: 38 48 100;
+        --ink: 228 234 252;
+        --muted: 140 154 186;
+        --faint: 80 96 134;
+        --accent: 138 128 255;
+        --accent-2: 200 100 255;
+        --accent-ink: 6 8 20;
         --success: 52 211 153;
         --warning: 251 191 36;
         --danger: 248 113 113;
         --info: 56 189 248;
-        --chart-1: 139 130 255;
+        --chart-1: 138 128 255;
         --chart-2: 52 211 153;
         --chart-3: 251 191 36;
         --chart-4: 56 189 248;
         --chart-5: 244 114 182;
-        --chart-6: 100 116 139;
-        --glass: 18 24 44;
-        --glass-alpha: 0.62;
-        --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 28px -8px rgb(0 0 0 / 0.5);
-        --shadow-lg: 0 8px 24px -6px rgb(0 0 0 / 0.5), 0 28px 64px -16px rgb(0 0 0 / 0.6);
-        --aurora-1: 99 91 255;
-        --aurora-2: 168 85 247;
+        --chart-6: 88 104 140;
+        --glass: 10 14 34;
+        --glass-alpha: 0.70;
+        --shadow: 0 1px 2px rgb(0 0 0 / 0.6), 0 8px 32px -8px rgb(0 0 0 / 0.55);
+        --shadow-lg: 0 8px 28px -6px rgb(0 0 0 / 0.55), 0 32px 72px -16px rgb(0 0 0 / 0.65);
+        --shadow-accent: 0 8px 40px -8px rgb(var(--accent) / 0.45);
+        --aurora-1: 110 100 255;
+        --aurora-2: 190 80 255;
         --aurora-3: 14 165 233;
+        --aurora-4: 16 185 129;
       }
       .material-symbols-outlined { font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24; vertical-align:middle; }
       html, body { background-color: rgb(var(--bg)); color: rgb(var(--ink)); font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing: antialiased; }
       body, .card, aside, header { transition: background-color .25s ease, border-color .25s ease; }
 
-      /* Ambient aurora — a soft, slow-drifting glow behind everything for depth. */
+      /* Ambient aurora — multi-blob slow-drifting glow for depth and atmosphere. */
       body::before {
-        content: ''; position: fixed; inset: -20% -10% auto -10%; height: 70vh; z-index: 0; pointer-events: none;
+        content: ''; position: fixed; inset: -25% -15% auto -15%; height: 80vh; z-index: 0; pointer-events: none;
         background:
-          radial-gradient(48vw 42vh at 18% 8%, rgb(var(--aurora-1) / 0.16), transparent 60%),
-          radial-gradient(42vw 40vh at 82% 0%, rgb(var(--aurora-2) / 0.14), transparent 60%),
-          radial-gradient(40vw 38vh at 60% 24%, rgb(var(--aurora-3) / 0.10), transparent 62%);
-        filter: blur(8px); opacity: 0.9;
-        animation: jh-aurora 22s ease-in-out infinite alternate;
+          radial-gradient(52vw 46vh at 15% 6%,  rgb(var(--aurora-1) / 0.20), transparent 58%),
+          radial-gradient(44vw 42vh at 84% 2%,  rgb(var(--aurora-2) / 0.18), transparent 58%),
+          radial-gradient(42vw 40vh at 58% 22%, rgb(var(--aurora-3) / 0.13), transparent 62%),
+          radial-gradient(36vw 34vh at 30% 50%, rgb(var(--aurora-4) / 0.08), transparent 65%);
+        filter: blur(10px); opacity: 0.95;
+        animation: jh-aurora 26s ease-in-out infinite alternate;
       }
-      .dark body::before { opacity: 0.7; }
+      body::after {
+        content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+        background-image: radial-gradient(circle, rgb(var(--line) / 0.35) 1px, transparent 1px);
+        background-size: 28px 28px;
+        mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent);
+        -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent);
+        opacity: 0.5;
+      }
+      .dark body::before { opacity: 0.85; }
+      .dark body::after  { opacity: 0.25; }
       @keyframes jh-aurora {
         0%   { transform: translate3d(0,0,0) scale(1); }
-        50%  { transform: translate3d(2%, 1.5%, 0) scale(1.06); }
-        100% { transform: translate3d(-2%, 0.5%, 0) scale(1.02); }
+        33%  { transform: translate3d(2.5%, 1%, 0) scale(1.05); }
+        66%  { transform: translate3d(-1.5%, 2%, 0) scale(1.08); }
+        100% { transform: translate3d(-2.5%, 0.5%, 0) scale(1.03); }
       }
       #root { width: 100%; position: relative; z-index: 1; }
 
       /* Frosted-glass card — translucent surface with a soft hairline + layered shadow. */
       .card {
         background: rgb(var(--glass) / var(--glass-alpha));
-        backdrop-filter: blur(14px) saturate(140%);
-        -webkit-backdrop-filter: blur(14px) saturate(140%);
-        border: 1px solid rgb(var(--line));
+        backdrop-filter: blur(18px) saturate(160%);
+        -webkit-backdrop-filter: blur(18px) saturate(160%);
+        border: 1px solid rgb(var(--line) / 0.7);
         box-shadow: var(--shadow);
         position: relative;
+        overflow: hidden;
       }
-      /* Top hairline sheen gives cards a subtle lit edge. */
+      /* Top hairline sheen — lit edge for glass depth. */
       .card::after {
         content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-        background: linear-gradient(180deg, rgb(255 255 255 / 0.06), transparent 38%);
+        background: linear-gradient(165deg, rgb(255 255 255 / 0.10) 0%, transparent 42%);
       }
-      .dark .card::after { background: linear-gradient(180deg, rgb(255 255 255 / 0.04), transparent 40%); }
-      .card-hover { transition: transform .2s ease, box-shadow .25s ease, border-color .25s ease; }
-      .card-hover:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: rgb(var(--accent) / 0.4); }
+      .dark .card::after { background: linear-gradient(165deg, rgb(255 255 255 / 0.06) 0%, transparent 44%); }
+      .card-hover { transition: transform .22s cubic-bezier(.22,.61,.36,1), box-shadow .28s ease, border-color .22s ease; }
+      .card-hover:hover {
+        transform: translateY(-4px);
+        box-shadow: var(--shadow-lg), 0 0 0 1px rgb(var(--accent) / 0.2);
+        border-color: rgb(var(--accent) / 0.45);
+      }
+      .dark .card-hover:hover { box-shadow: var(--shadow-lg), 0 0 28px -6px rgb(var(--accent) / 0.25); }
+
+      /* Premium card — gradient border using padding-box trick. */
+      .card-premium {
+        background: rgb(var(--glass) / var(--glass-alpha));
+        backdrop-filter: blur(18px) saturate(160%);
+        -webkit-backdrop-filter: blur(18px) saturate(160%);
+        border: 1px solid transparent;
+        background-clip: padding-box;
+        box-shadow: var(--shadow);
+        position: relative;
+        overflow: hidden;
+      }
+      .card-premium::before {
+        content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
+        background: linear-gradient(135deg, rgb(var(--accent) / 0.5), rgb(var(--accent-2) / 0.3), transparent 60%);
+        -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+        -webkit-mask-composite: xor; mask-composite: exclude;
+      }
+      .card-premium::after {
+        content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+        background: linear-gradient(165deg, rgb(255 255 255 / 0.08) 0%, transparent 44%);
+      }
 
       /* Gradient utilities */
       .gradient-text {
-        background: linear-gradient(100deg, rgb(var(--accent)), rgb(var(--accent-2)));
+        background: linear-gradient(110deg, rgb(var(--accent)), rgb(var(--accent-2)) 60%, rgb(var(--info)));
         -webkit-background-clip: text; background-clip: text; color: transparent;
       }
-      .gradient-accent { background: linear-gradient(120deg, rgb(var(--accent)), rgb(var(--accent-2))); }
-      .glow-accent { box-shadow: 0 8px 28px -8px rgb(var(--accent) / 0.55); }
+      .gradient-accent { background: linear-gradient(125deg, rgb(var(--accent)), rgb(var(--accent-2))); }
+      .glow-accent { box-shadow: var(--shadow-accent); }
       .ring-grad { border: 1px solid transparent; background:
         linear-gradient(rgb(var(--surface)), rgb(var(--surface))) padding-box,
         linear-gradient(120deg, rgb(var(--accent) / 0.6), rgb(var(--accent-2) / 0.5)) border-box; }
 
-      /* Interactive pill group container — visible border so toggle groups always read as controls */
+      /* Neon accent line — decorative gradient divider */
+      .neon-line {
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgb(var(--accent) / 0.6), rgb(var(--accent-2) / 0.5), transparent);
+      }
+
+      /* Accent glow ring on stat cards and icon tiles */
+      .icon-glow {
+        box-shadow: 0 0 0 4px rgb(var(--accent) / 0.08), 0 6px 20px -6px rgb(var(--accent) / 0.4);
+      }
+      .dark .icon-glow { box-shadow: 0 0 0 4px rgb(var(--accent) / 0.12), 0 6px 24px -6px rgb(var(--accent) / 0.55); }
+
+      /* Interactive pill group container */
       .pill-group {
         background: rgb(var(--surface-2));
         border: 1.5px solid rgb(var(--line));
@@ -174,14 +228,29 @@
       /* Bordered control — used for slider, refresh/reset buttons etc */
       .ctrl-border {
         border: 1.5px solid rgb(var(--line));
-        transition: border-color .18s ease;
+        transition: border-color .18s ease, box-shadow .18s ease;
       }
-      .ctrl-border:hover { border-color: rgb(var(--accent) / 0.5); }
+      .ctrl-border:hover { border-color: rgb(var(--accent) / 0.5); box-shadow: 0 0 0 3px rgb(var(--accent) / 0.08); }
 
-      .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+      .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
       .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-      .custom-scrollbar::-webkit-scrollbar-thumb { background: rgb(var(--surface-3)); border-radius: 10px; }
-      .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgb(var(--accent) / 0.5); }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: linear-gradient(180deg, rgb(var(--accent) / 0.4), rgb(var(--accent-2) / 0.3));
+        border-radius: 10px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgb(var(--accent) / 0.7); }
+
+      /* Shimmer-text — animated gradient sweep for brand names / highlights */
+      @keyframes jh-shimmer-text {
+        0%   { background-position: 200% center; }
+        100% { background-position: -200% center; }
+      }
+      .shimmer-text {
+        background: linear-gradient(110deg, rgb(var(--accent)) 20%, rgb(var(--accent-2)) 40%, rgb(var(--info)) 55%, rgb(var(--accent)) 75%);
+        background-size: 200% auto;
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+        animation: jh-shimmer-text 4s linear infinite;
+      }
 
       /* Skeleton loading — reserves layout space so content doesn't jump on load. */
       @keyframes jh-shimmer { 100% { transform: translateX(100%); } }
@@ -199,6 +268,32 @@
       .fade-up-3 { animation-delay: .16s; } .fade-up-4 { animation-delay: .22s; }
       .fade-up-5 { animation-delay: .28s; } .fade-up-6 { animation-delay: .34s; }
       @keyframes jh-pulse-glow { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+
+      /* Drawer slide-in from right */
+      @keyframes jh-slide-right { from { transform: translateX(100%); opacity: 0.4; } to { transform: translateX(0); opacity: 1; } }
+      .slide-right { animation: jh-slide-right .38s cubic-bezier(.22,.61,.36,1) both; }
+
+      /* Simple fade-in for backdrops / overlays */
+      @keyframes jh-fade-in { from { opacity: 0; } to { opacity: 1; } }
+      .fade-in { animation: jh-fade-in .22s ease both; }
+
+      /* Pop-in for small chips / badges — slight overshoot spring */
+      @keyframes jh-pop { from { opacity: 0; transform: scale(.65); } to { opacity: 1; transform: scale(1); } }
+      .pop-in { animation: jh-pop .28s cubic-bezier(.34,1.56,.64,1) both; }
+
+      /* Avatar gradient ring — shown on parent hover via group-hover utility */
+      .avatar-glow { transition: box-shadow .25s ease; }
+      .group:hover .avatar-glow { box-shadow: 0 0 0 3px rgb(var(--accent) / 0.35), 0 0 14px 2px rgb(var(--accent) / 0.2); }
+
+      /* Score number pop on load */
+      @keyframes jh-score-in { from { opacity: 0; transform: scale(.7) translateY(4px); } to { opacity: 1; transform: none; } }
+      .score-in { animation: jh-score-in .4s cubic-bezier(.34,1.3,.64,1) both; }
+
+      /* DAG flow edge — animated dash sweep along pipeline connector lines */
+      @keyframes jh-flow-track {
+        from { stroke-dashoffset: 18; }
+        to   { stroke-dashoffset: 0; }
+      }
 
       /* Honor users who prefer reduced motion — disable shimmer, spins, drift, and transitions. */
       @media (prefers-reduced-motion: reduce) {

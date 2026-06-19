@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react'
 import { DonutChart, AreaChart, HBarList, CHART_COLORS, scoreColor, GrowBar } from '../components/charts'
 import { PageHeader, Card, Loading, EmptyState } from '../components/ui'
 
+function staggerDelay(i, step = 0.055, cap = 0.48) {
+  return `${Math.min(i * step, cap)}s`
+}
+
 const SUB_SCORE_LABELS = {
   keyword_match_score: 'Keyword Match',
   semantic_alignment_score: 'Semantic Alignment',
@@ -62,7 +66,7 @@ export default function Analytics() {
       />
 
       {/* Skill demand + companies */}
-      <div className="grid grid-cols-12 gap-5 mb-6">
+      <div className="grid grid-cols-12 gap-5 mb-6 fade-up fade-up-1">
         <Card className="col-span-12 xl:col-span-7" title="Most In-Demand Skills" icon="construction"
           action={<span className="text-[11px] text-faint font-mono">from extracted job posts</span>}>
           {skills.length
@@ -78,7 +82,7 @@ export default function Analytics() {
       </div>
 
       {/* Cloud demand + scoring models */}
-      <div className="grid grid-cols-12 gap-5 mb-6">
+      <div className="grid grid-cols-12 gap-5 mb-6 fade-up fade-up-2">
         <Card className="col-span-12 md:col-span-6" title="Cloud Platform Demand" icon="cloud"
           action={<span className="text-[11px] text-faint font-mono">across targeted jobs</span>}>
           {cloudDemand.length
@@ -94,7 +98,7 @@ export default function Analytics() {
       </div>
 
       {/* Apply channel + experience + locations */}
-      <div className="grid grid-cols-12 gap-5 mb-6">
+      <div className="grid grid-cols-12 gap-5 mb-6 fade-up fade-up-3">
         <Card className="col-span-12 md:col-span-6 xl:col-span-4" title="How To Apply" icon="outgoing_mail">
           {applyData.length
             ? <DonutChart data={applyData} size={150} thickness={20} centerLabel="posts" />
@@ -116,7 +120,7 @@ export default function Analytics() {
       </div>
 
       {/* Score trend + resume profile */}
-      <div className="grid grid-cols-12 gap-5">
+      <div className="grid grid-cols-12 gap-5 fade-up fade-up-4">
         <Card className="col-span-12 xl:col-span-6" title="Avg ATS Score Over Time" icon="trending_up"
           action={<span className="text-[11px] text-faint font-mono">by scoring date</span>}>
           <AreaChart data={trend} color="rgb(var(--chart-2))" maxY={100} />
@@ -126,8 +130,8 @@ export default function Analytics() {
           action={<span className="text-[11px] text-faint font-mono">avg sub-scores, all jobs</span>}>
           {subScores.length ? (
             <div className="space-y-2.5">
-              {subScores.map(s => (
-                <div key={s.label}>
+              {subScores.map((s, i) => (
+                <div key={s.label} className="fade-up" style={{ animationDelay: staggerDelay(i, 0.04, 0.4) }}>
                   <div className="flex justify-between mb-1">
                     <span className="text-xs font-medium text-ink">{s.label}</span>
                     <span className="text-xs font-mono font-semibold" style={{ color: scoreColor(s.value) }}>{s.value}</span>

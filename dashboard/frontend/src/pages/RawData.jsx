@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react'
 import { scoreColor } from '../components/charts'
 import { PageHeader, ModePill, relativeTime, EmptyState, Loading, inputCls } from '../components/ui'
 
+function staggerDelay(i, step = 0.055, cap = 0.48) {
+  return `${Math.min(i * step, cap)}s`
+}
+
 function StatusBadge({ s }) {
   const styles = {
     done: 'bg-success/10 text-success',
@@ -52,8 +56,8 @@ export default function RawData() {
         <div className="card rounded-2xl"><EmptyState title="No posts found" hint="Try a different search, or run the pipeline." /></div>
       ) : (
         <div className="space-y-4">
-          {rows.map(r => (
-            <div key={r.id} className="card rounded-2xl p-5 hover:border-accent/40 transition-colors">
+          {rows.map((r, i) => (
+            <div key={r.id} className="card rounded-2xl p-5 hover:border-accent/40 transition-colors fade-up" style={{ animationDelay: staggerDelay(i, 0.06, 0.45) }}>
               <div className="flex flex-wrap justify-between items-start gap-3 mb-3">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-accent/12 text-accent flex items-center justify-center font-bold shrink-0">

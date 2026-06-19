@@ -5,11 +5,13 @@ Serves only REST API endpoints consumed by the React frontend.
 React dev server: http://localhost:5173  (proxies /api/* here)
 API only:         http://localhost:5000
 """
+import glob
 import json
+import os
 import sqlite3
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -20,8 +22,12 @@ app = Flask(__name__)
 CORS(app)
 DB_PATH = Path(__file__).parent.parent / "data" / "linkedin_scraper.db"
 
-# Handle to the last pipeline subprocess started via /api/run-pipeline
-_pipeline_proc = None
+# Pipeline subprocess state
+_pipeline_proc       = None
+_pipeline_started_at = None
+_pipeline_args       = {}
+_pipeline_log_path   = None
+_pipeline_log_file   = None  # keep reference so GC doesn't close the handle early
 
 # NER training state (in-process background thread)
 _ner_state = {"running": False, "last_run": None, "last_count": 0, "error": None}
@@ -390,6 +396,44 @@ def api_recruiters():
     return jsonify([dict(r) for r in rows])
 
 
+@app.route("/api/recruiters/<path:email>/posts")
+def api_recruiter_posts(email):
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT
+            n.id            AS norm_id,
+            n.title,
+            n.company,
+            n.location_city,
+            n.location_state,
+            n.location_country,
+            n.work_mode,
+            n.is_remote,
+            n.experience_min,
+            n.experience_max,
+            n.skills,
+            n.email_subject_format,
+            n.email_required_fields,
+            n.extracted_by,
+            r.posted_at,
+            r.scraped_at,
+            r.post_url,
+            r.post_content,
+            t.id            AS target_job_id,
+            t.cloud_fit,
+            t.clouds_required,
+            s.final_ats_score
+        FROM normalized_posts n
+        JOIN raw_posts r ON r.id = n.raw_post_id
+        LEFT JOIN target_jobs t ON t.norm_post_id = n.id
+        LEFT JOIN ats_scores s ON s.target_job_id = t.id
+        WHERE n.recruiter_email = ?
+        ORDER BY COALESCE(r.posted_at, r.scraped_at) DESC
+    """, (email,)).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
 @app.route("/api/raw-posts")
 def api_raw_posts():
     page  = request.args.get("page", 1, type=int)
@@ -666,46 +710,205 @@ def api_train_ner():
 
 @app.route("/api/pipeline-status")
 def api_pipeline_status():
-    """Live pipeline state: subprocess liveness + extraction backlog."""
+    """Live pipeline state: subprocess liveness + per-stage metrics (current session + all-time)."""
     global _pipeline_proc
     running = _pipeline_proc is not None and _pipeline_proc.poll() is None
 
     conn = get_db()
-    pending = conn.execute(
-        "SELECT COUNT(*) FROM raw_posts WHERE extraction_status='pending'"
-    ).fetchone()[0]
-    unscored = conn.execute("""
+
+    # ── All-time totals ──────────────────────────────────────────────────────
+    raw_total  = conn.execute("SELECT COUNT(*) FROM raw_posts").fetchone()[0]
+    raw_done   = conn.execute("SELECT COUNT(*) FROM raw_posts WHERE extraction_status='done'").fetchone()[0]
+    raw_failed = conn.execute("SELECT COUNT(*) FROM raw_posts WHERE extraction_status='failed'").fetchone()[0]
+    pending    = conn.execute("SELECT COUNT(*) FROM raw_posts WHERE extraction_status='pending'").fetchone()[0]
+    normalized = conn.execute("SELECT COUNT(*) FROM normalized_posts").fetchone()[0]
+    targeted   = conn.execute("SELECT COUNT(*) FROM target_jobs").fetchone()[0]
+    scored     = conn.execute("SELECT COUNT(*) FROM ats_scores").fetchone()[0]
+    unscored   = conn.execute("""
         SELECT COUNT(*) FROM target_jobs t
         WHERE (SELECT COUNT(*) FROM ats_scores s WHERE s.target_job_id = t.id) = 0
     """).fetchone()[0]
-    last_run = conn.execute("SELECT MAX(scraped_at) FROM raw_posts").fetchone()[0]
+    last_run   = conn.execute("SELECT MAX(scraped_at) FROM raw_posts").fetchone()[0]
+
+    # ── Current-session totals (filtered by pipeline start time) ────────────
+    sa = _pipeline_started_at   # ISO string like "2025-01-01T10:00:00", or None
+    if sa:
+        cur_scraped = conn.execute(
+            "SELECT COUNT(*) FROM raw_posts WHERE scraped_at >= ?", (sa,)).fetchone()[0]
+        cur_extracted = conn.execute(
+            "SELECT COUNT(*) FROM raw_posts WHERE scraped_at >= ? AND extraction_status='done'", (sa,)).fetchone()[0]
+        cur_pending = conn.execute(
+            "SELECT COUNT(*) FROM raw_posts WHERE scraped_at >= ? AND extraction_status='pending'", (sa,)).fetchone()[0]
+        cur_failed = conn.execute(
+            "SELECT COUNT(*) FROM raw_posts WHERE scraped_at >= ? AND extraction_status='failed'", (sa,)).fetchone()[0]
+        cur_targeted = conn.execute("""
+            SELECT COUNT(*) FROM target_jobs t
+            JOIN raw_posts r ON r.id = t.raw_post_id WHERE r.scraped_at >= ?
+        """, (sa,)).fetchone()[0]
+        cur_scored = conn.execute("""
+            SELECT COUNT(*) FROM ats_scores s
+            JOIN target_jobs t ON t.id = s.target_job_id
+            JOIN raw_posts r   ON r.id = t.raw_post_id WHERE r.scraped_at >= ?
+        """, (sa,)).fetchone()[0]
+    else:
+        cur_scraped = cur_extracted = cur_pending = cur_failed = cur_targeted = cur_scored = None
+
     conn.close()
 
     return jsonify({
-        "running": running,
-        "exit_code": _pipeline_proc.returncode if _pipeline_proc and not running else None,
+        "running":    running,
+        "exit_code":  _pipeline_proc.returncode if _pipeline_proc and not running else None,
+        "started_at": _pipeline_started_at,
+        "args":       _pipeline_args,
+        "stages": {
+            "scrape": {
+                "current": cur_scraped, "total": raw_total,
+            },
+            "extract": {
+                "current_done":    cur_extracted,  "total_done":    raw_done,
+                "current_pending": cur_pending,     "total_pending": pending,
+                "current_failed":  cur_failed,      "total_failed":  raw_failed,
+            },
+            "filter": {
+                "current": cur_targeted,  "total": targeted,
+                "normalized": normalized,
+            },
+            "score": {
+                "current": cur_scored,  "total": scored,
+                "unscored": unscored,
+            },
+        },
         "pending_extraction": pending,
-        "unscored_targets": unscored,
+        "unscored_targets":   unscored,
         "last_run": last_run[:16].replace("T", " ") if last_run else None,
     })
 
 
+@app.route("/api/pipeline-log")
+def api_pipeline_log():
+    """Return the last 200 lines of the most recent pipeline run log."""
+    if not _pipeline_log_path:
+        return jsonify({"lines": []})
+    log_path = Path(_pipeline_log_path)
+    if not log_path.exists():
+        return jsonify({"lines": []})
+    try:
+        lines = log_path.read_text(errors="replace").splitlines()
+        return jsonify({"lines": lines[-200:]})
+    except OSError:
+        return jsonify({"lines": []})
+
+
 @app.route("/api/run-pipeline", methods=["POST"])
 def api_run_pipeline():
-    """Trigger the full pipeline in background (no-op if already running)."""
-    global _pipeline_proc
+    """Trigger the full pipeline in background (no-op if already running).
+
+    Accepts JSON body:
+      { "days": 1|7|30, "limit": 0, "visible": false }
+    """
+    global _pipeline_proc, _pipeline_started_at, _pipeline_args, _pipeline_log_path, _pipeline_log_file
+
     if _pipeline_proc is not None and _pipeline_proc.poll() is None:
         return jsonify({"status": "already_running"})
 
+    body    = request.get_json(silent=True) or {}
+    days    = int(body.get("days", 1))
+    limit   = int(body.get("limit", 0))
+    visible = bool(body.get("visible", False))
+
+    if days not in (1, 7, 30):
+        days = 1
+
     project_root = Path(__file__).parent.parent
     venv_python  = project_root / "venv" / "bin" / "python"
+
+    cmd = [str(venv_python), "main.py", "--days", str(days)]
+    if limit > 0:
+        cmd += ["--limit", str(limit)]
+    if visible:
+        cmd += ["--visible"]
+
+    log_path = project_root / "data" / "pipeline_run.log"
+    _pipeline_log_path = str(log_path)
+    _pipeline_log_file = open(log_path, "w", buffering=1)   # line-buffered
+
     _pipeline_proc = subprocess.Popen(
-        [str(venv_python), "main.py"],
+        cmd,
         cwd=str(project_root),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=_pipeline_log_file,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,   # own process group → safe to killpg
     )
-    return jsonify({"status": "started"})
+    _pipeline_started_at = datetime.now().isoformat(timespec="seconds")
+    _pipeline_args = {"days": days, "limit": limit, "visible": visible}
+
+    return jsonify({"status": "started", "args": _pipeline_args})
+
+
+@app.route("/api/stop-pipeline", methods=["POST"])
+def api_stop_pipeline():
+    """Kill pipeline subprocess + any other project scripts that are running.
+
+    Order of operations (background thread, non-blocking):
+      1. SIGTERM the pipeline process group (kills main.py + all its threads).
+         After 3 s escalate to SIGKILL if still alive.
+      2. pkill -TERM any remaining project scripts by their full path.
+         After 1 s escalate those to pkill -KILL.
+    """
+    import os, signal, threading
+
+    project_root = Path(__file__).parent.parent
+
+    # Scripts a user might have running in a separate terminal
+    _KILLABLE_SCRIPTS = [
+        project_root / "scripts" / "send_outreach.py",
+        project_root / "scripts" / "rescore.py",
+        project_root / "scripts" / "compare_scores.py",
+        project_root / "scripts" / "view_jobs.py",
+        project_root / "scripts" / "view_scores.py",
+        project_root / "model"   / "train.py",
+        project_root / "main.py",
+    ]
+
+    def _killpg(sig):
+        """Send sig to the pipeline process group (safe because start_new_session=True)."""
+        if _pipeline_proc is None or _pipeline_proc.poll() is not None:
+            return
+        try:
+            pgid = os.getpgid(_pipeline_proc.pid)
+            os.killpg(pgid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    def _pkill(sig_name, pattern):
+        try:
+            subprocess.run(
+                ["pkill", f"-{sig_name}", "-f", str(pattern)],
+                capture_output=True, timeout=2,
+            )
+        except Exception:
+            pass
+
+    def _stop():
+        # ── 1. Kill pipeline process group ──────────────────────────────────
+        _killpg(signal.SIGTERM)
+        try:
+            if _pipeline_proc is not None:
+                _pipeline_proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            _killpg(signal.SIGKILL)
+
+        # ── 2. Kill any project scripts still alive ──────────────────────────
+        for script in _KILLABLE_SCRIPTS:
+            _pkill("TERM", script)
+
+        import time; time.sleep(1)
+
+        for script in _KILLABLE_SCRIPTS:
+            _pkill("KILL", script)
+
+    threading.Thread(target=_stop, daemon=True, name="pipeline-stop").start()
+    return jsonify({"status": "stopping"})
 
 
 # ── Email outreach ────────────────────────────────────────────────────────────
@@ -762,6 +965,16 @@ def api_send_email(target_id):
 
     if not subject or not email_body or not to_email:
         return jsonify({"error": "subject, body, and to_email are required"}), 400
+
+    # Guard against duplicate sends for the same job
+    conn = get_db()
+    already_sent = conn.execute(
+        "SELECT COUNT(*) FROM email_outreach WHERE target_job_id = ? AND status = 'sent'",
+        (target_id,)
+    ).fetchone()[0]
+    conn.close()
+    if already_sent:
+        return jsonify({"error": "Email already sent for this job"}), 409
 
     try:
         from pipeline.outreach.sender import send_email

@@ -1,7 +1,36 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { DonutChart, AreaChart, scoreColor, GrowBar } from '../components/charts'
 import { PageHeader, Card, StatCard, ScoreChip, ModePill, EmptyState, Skeleton, StatCardSkeleton } from '../components/ui'
+
+function useCountUp(target, duration = 750) {
+  const [val, setVal] = useState(0)
+  const raf = useRef(null)
+  useEffect(() => {
+    const n = Number(target)
+    if (!n) { setVal(0); return }
+    let start = null
+    const tick = (ts) => {
+      if (!start) start = ts
+      const p = Math.min((ts - start) / duration, 1)
+      const eased = 1 - Math.pow(1 - p, 3)
+      setVal(Math.round(eased * n))
+      if (p < 1) raf.current = requestAnimationFrame(tick)
+    }
+    raf.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf.current)
+  }, [target, duration])
+  return val
+}
+
+function staggerDelay(i, step = 0.055, cap = 0.48) {
+  return `${Math.min(i * step, cap)}s`
+}
+
+function AnimatedStatCard({ icon, label, value, sub, tone }) {
+  const counted = useCountUp(typeof value === 'number' ? value : 0)
+  return <StatCard icon={icon} label={label} value={typeof value === 'number' ? counted : value} sub={sub} tone={tone} />
+}
 
 const BAND_COLORS = {
   '80-100': 'rgb(var(--success))',
@@ -85,15 +114,15 @@ export default function Overview() {
       </PageHeader>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6 fade-up fade-up-1">
-        <StatCard icon="travel_explore" label="Posts Scraped" value={stats.raw_total} sub={`${(stats.by_status || {}).pending || 0} pending extraction`} tone="info" />
-        <StatCard icon="verified" label="Jobs Scored" value={stats.scored} sub={`of ${stats.targeted} targeted · avg ${stats.avg_score ?? '—'}`} tone="accent" />
-        <StatCard icon="local_fire_department" label="Hot Leads" value={stats.hot_leads ?? 0} sub="fresh ≤48h · AWS · score ≥ 60" tone="warning" />
-        <StatCard icon="workspace_premium" label="Elite Matches" value={stats.high_match_80} sub="score ≥ 80 — apply first" tone="success" />
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
+        <div className="fade-up fade-up-1"><AnimatedStatCard icon="travel_explore" label="Posts Scraped" value={stats.raw_total} sub={`${(stats.by_status || {}).pending || 0} pending extraction`} tone="info" /></div>
+        <div className="fade-up fade-up-2"><AnimatedStatCard icon="verified" label="Jobs Scored" value={stats.scored} sub={`of ${stats.targeted} targeted · avg ${stats.avg_score ?? '—'}`} tone="accent" /></div>
+        <div className="fade-up fade-up-3"><AnimatedStatCard icon="local_fire_department" label="Hot Leads" value={stats.hot_leads ?? 0} sub="fresh ≤48h · AWS · score ≥ 60" tone="warning" /></div>
+        <div className="fade-up fade-up-4"><AnimatedStatCard icon="workspace_premium" label="Elite Matches" value={stats.high_match_80} sub="score ≥ 80 — apply first" tone="success" /></div>
       </div>
 
       {/* Funnel + score distribution */}
-      <div className="grid grid-cols-12 gap-5 mb-6 fade-up fade-up-2">
+      <div className="grid grid-cols-12 gap-5 mb-6 fade-up" style={{ animationDelay: '0.18s' }}>
         <Card className="col-span-12 xl:col-span-7" title="Pipeline Funnel" icon="filter_alt">
           <div className="grid grid-cols-4 gap-3">
             {funnel.map((st, i) => {
@@ -128,7 +157,7 @@ export default function Overview() {
       </div>
 
       {/* Activity trend + work mode + cloud fit */}
-      <div className="grid grid-cols-12 gap-5 mb-6 fade-up fade-up-3">
+      <div className="grid grid-cols-12 gap-5 mb-6 fade-up" style={{ animationDelay: '0.26s' }}>
         <Card className="col-span-12 xl:col-span-6" title="Scrape Activity" icon="show_chart">
           <AreaChart data={trend} valueSuffix=" posts" />
         </Card>
@@ -148,14 +177,15 @@ export default function Overview() {
       </div>
 
       {/* Top jobs + extraction health */}
-      <div className="grid grid-cols-12 gap-5 fade-up fade-up-4">
+      <div className="grid grid-cols-12 gap-5 fade-up" style={{ animationDelay: '0.34s' }}>
         <Card className="col-span-12 xl:col-span-8" title="Top Scored Jobs" icon="trophy"
           action={<Link to="/jobs" className="text-accent text-xs font-semibold hover:underline">View all →</Link>}>
           {top5.length ? (
             <div className="divide-y divide-line -mx-2">
-              {top5.map(j => (
+              {top5.map((j, i) => (
                 <Link key={j.target_id} to={`/ats/${j.target_id}`}
-                  className="flex items-center gap-4 px-2 py-3 hover:bg-surface-2 rounded-lg transition-colors group">
+                  className="flex items-center gap-4 px-2 py-3 hover:bg-surface-2 rounded-lg transition-colors group fade-up"
+                  style={{ animationDelay: staggerDelay(i, 0.06, 0.35) }}>
                   <ScoreChip score={j.final_ats_score} />
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold text-ink text-sm truncate group-hover:text-accent transition-colors">{j.title || 'Untitled'}</p>

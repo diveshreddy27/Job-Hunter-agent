@@ -1,7 +1,32 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { scoreColor } from '../components/charts'
 import { PageHeader, StatCard, EmptyState, Loading, inputCls } from '../components/ui'
+
+function useCountUp(target, duration = 750) {
+  const [val, setVal] = useState(0)
+  const raf = useRef(null)
+  useEffect(() => {
+    const n = Number(target)
+    if (!n) { setVal(0); return }
+    let start = null
+    const tick = (ts) => {
+      if (!start) start = ts
+      const p = Math.min((ts - start) / duration, 1)
+      const eased = 1 - Math.pow(1 - p, 3)
+      setVal(Math.round(eased * n))
+      if (p < 1) raf.current = requestAnimationFrame(tick)
+    }
+    raf.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf.current)
+  }, [target, duration])
+  return val
+}
+
+function AnimatedStatCard({ icon, label, value, tone }) {
+  const counted = useCountUp(typeof value === 'number' ? value : 0)
+  return <StatCard icon={icon} label={label} value={typeof value === 'number' ? counted : value} tone={tone} />
+}
 
 const TRACKER_STATUSES = ['applied', 'assessment', 'interviewing', 'offer', 'rejected']
 
@@ -21,7 +46,7 @@ function EmailStatusBadge({ s }) {
     pending: 'bg-warning/10 text-warning',
   }
   return (
-    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${styles[s] || 'bg-surface-2 text-muted'}`}>
+    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide pop-in ${styles[s] || 'bg-surface-2 text-muted'}`}>
       {s}
     </span>
   )
@@ -134,10 +159,10 @@ export default function Outreach() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
-        <StatCard icon="outgoing_mail"  label="Emails Sent"   value={data.sent}    tone="success" />
-        <StatCard icon="error"          label="Failed"         value={data.failed}  tone="danger"  />
-        <StatCard icon="forum"          label="Interviewing"   value={interviews}   tone="warning" />
-        <StatCard icon="sticky_note_2"  label="Replies Logged" value={withNotes}    tone="accent"  />
+        <div className="fade-up fade-up-1"><AnimatedStatCard icon="outgoing_mail" label="Emails Sent"   value={data.sent}   tone="success" /></div>
+        <div className="fade-up fade-up-2"><AnimatedStatCard icon="error"         label="Failed"         value={data.failed} tone="danger"  /></div>
+        <div className="fade-up fade-up-3"><AnimatedStatCard icon="forum"         label="Interviewing"   value={interviews}  tone="warning" /></div>
+        <div className="fade-up fade-up-4"><AnimatedStatCard icon="sticky_note_2" label="Replies Logged" value={withNotes}   tone="accent"  /></div>
       </div>
 
       {/* Unsaved changes banner */}
@@ -173,7 +198,7 @@ export default function Outreach() {
       )}
 
       {/* Search */}
-      <div className="card rounded-2xl px-4 py-3 mb-4">
+      <div className="card rounded-2xl px-4 py-3 mb-4 fade-up" style={{ animationDelay: '0.22s' }}>
         <div className="relative max-w-sm">
           <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-faint pointer-events-none">search</span>
           <input value={search} onChange={e => setSearch(e.target.value)}
@@ -194,7 +219,7 @@ export default function Outreach() {
       </div>
 
       {/* Table */}
-      <div className="card rounded-2xl overflow-hidden">
+      <div className="card rounded-2xl overflow-hidden fade-up" style={{ animationDelay: '0.28s' }}>
         {!filtered.length ? (
           <EmptyState icon="mail" title={search ? 'No matches' : 'No emails sent yet'}
             hint={search ? 'Try a different search term.' : 'Open a job and hit Apply, or run scripts/send_outreach.py.'} />
@@ -216,7 +241,7 @@ export default function Outreach() {
 
                   return (
                     <>
-                      <tr key={o.id} className="hover:bg-surface-2/50 transition-colors group">
+                      <tr key={o.id} className="hover:bg-surface-2/50 transition-all duration-150 group">
 
                         {/* Email send status */}
                         <td className="px-4 py-3 whitespace-nowrap">

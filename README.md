@@ -138,21 +138,25 @@ Shows every detail for each matching job (scores, predictions, recruiter info, f
 | Flask API | http://localhost:5000 |
 | React UI  | http://localhost:5173 |
 
-A modern, theme-aware (light/dark) React UI — frosted-glass cards, gradient accents, an ambient
-aurora backdrop, and animated entrances. Cold emails can be drafted and sent inline from Jobs,
-Tracker, and ATS Detail via the AI **Email Composer** modal.
+A modern, theme-aware (light/dark) React UI — frosted-glass cards (18px blur, overflow-hidden), gradient accents, a multi-blob ambient aurora backdrop, subtle dot-grid texture, and animated entrances throughout. Cold emails can be drafted and sent inline from Jobs, Tracker, and ATS Detail via the AI **Email Composer** modal.
+
+Key UI features:
+- **Animated count-up stats** — all KPI numbers count from 0 on page load (ease-out cubic, 750ms)
+- **Staggered entrance animations** — cards, chips, and skill tags fade-up or pop-in with per-item delays
+- **Slide-in drawer** — Recruiters page opens a right-side panel with all posts for that recruiter
 
 ### Pages
 
 | Page | What it shows |
 |------|---------------|
-| Overview `/` | Pipeline funnel · score distribution · work modes · cloud fit · scrape trend · top jobs |
+| Overview `/` | Pipeline funnel · score distribution · work modes · cloud fit · scrape trend · top jobs (animated) |
 | Analytics `/analytics` | Skill demand · companies · cloud demand · locations · score trend · resume profile |
-| Jobs `/jobs` | Filterable leaderboard — score / mode / cloud fit / posted age / search / sort |
-| ATS Detail `/ats/:id` | Full breakdown: 11 sub-scores · predictions · skills · outreach playbook · send email |
-| Skills Gap `/skills-gap` | Gap skills frequency · keyword cloud · top resume changes |
-| Recruiters `/recruiters` | Directory with email, company, avg score, post count |
-| Tracker `/tracker` | Kanban: saved → applied → interviewing → offer/rejected |
+| Pipeline `/pipeline` | 4-stage DAG flow (Scrape → Extract → Filter → Score) with live metrics, animated flow edges, configure & run (days/limit/visible), stop button, live colorized run log |
+| Jobs `/jobs` | Filterable leaderboard — score / mode / cloud fit / posted age / Net New / search / sort; bulk send with minimize + stop |
+| ATS Detail `/ats/:id` | Full breakdown: animated score ring · 11 sub-scores (staggered) · predictions · skills/keywords (pop-in) · outreach playbook · send email |
+| Skills Gap `/skills-gap` | Gap skills frequency · keyword cloud (pop-in) · top resume changes |
+| Recruiters `/recruiters` | Card grid (staggered) → click to open side drawer with all that recruiter's posts, scores, skills, email hints |
+| Tracker `/tracker` | Kanban: saved → applied → interviewing → offer/rejected; pop-in cards |
 | Outreach `/outreach` | Sent-email history + recruiter-requested fields missing from candidate_info |
 | Raw Data `/raw-data` | Paginated browser of scraped posts (full post text, posted/scraped age) |
 
@@ -254,18 +258,18 @@ job-hunter-agent/
 │   └── linkedin_scraper.db          SQLite database (gitignored)
 │
 ├── dashboard/
-│   ├── app.py                       Flask API (REST endpoints + job_tracker)
+│   ├── app.py                       Flask API (REST endpoints + job_tracker; pipeline log + stop)
 │   └── frontend/                    React + Vite SPA
-│       ├── index.html               Tailwind CDN + theme tokens + glass/gradient styles
+│       ├── index.html               Tailwind CDN + theme tokens + glass/aurora/animation styles
 │       ├── src/
-│       │   ├── App.jsx              Router + 10 routes
+│       │   ├── App.jsx              Router + 11 routes
 │       │   ├── components/
-│       │   │   ├── Layout.jsx       glass sidebar + topbar + pipeline status
+│       │   │   ├── Layout.jsx       glass sidebar (shimmer brand, full-fill active nav) + topbar
 │       │   │   ├── charts.jsx       dependency-free SVG charts
-│       │   │   ├── ui.jsx           shared UI components
+│       │   │   ├── ui.jsx           shared UI: StatCard, ScoreChip (glow), inputs, etc.
 │       │   │   └── EmailComposer.jsx  AI email draft/edit/send modal
-│       │   └── pages/               Overview · Analytics · Jobs · Tracker · AtsDetail ·
-│       │                            SkillsGap · Recruiters · Outreach · RawData
+│       │   └── pages/               Overview · Analytics · Pipeline · Jobs · Tracker · AtsDetail ·
+│       │                            SkillsGap · Recruiters (card+drawer) · Outreach · RawData
 │       └── vite.config.js           /api proxy → Flask (+ polling watch for WSL HMR)
 │
 ├── scripts/
@@ -298,6 +302,7 @@ job-hunter-agent/
     ├── linkedin_scraper.db
     ├── queue/raw/                   Live batch files (ephemeral)
     ├── model_usage/                 Daily RPD counters
+    ├── pipeline_run.log             stdout+stderr of the most recent pipeline run (overwritten each run)
     └── missing_fields.json          Fields recruiter asked for but not in candidate_info.txt
 
 ```

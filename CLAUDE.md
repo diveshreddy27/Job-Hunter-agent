@@ -192,7 +192,13 @@ data/                            [gitignored] runtime data — never committed
 dashboard/
   app.py                         Flask API server — REST endpoints only, no page rendering;
                                    auto-creates job_tracker table on startup;
-                                   normalizes probabilities via normalize_prob()
+                                   normalizes probabilities via normalize_prob();
+                                   tracks pipeline subprocess state: _pipeline_proc,
+                                   _pipeline_started_at, _pipeline_args, _pipeline_log_path;
+                                   run-pipeline accepts {days, limit, visible} JSON body and
+                                   logs stdout+stderr to data/pipeline_run.log;
+                                   stop-pipeline uses SIGTERM→SIGKILL on process group;
+                                   send-email guards against duplicate sends (409 if already sent)
   frontend/
     index.html                   SPA shell: Tailwind CDN + CSS-variable theme tokens (light/dark)
                                    + Material Symbols + Google Fonts; theme bootstrap script
@@ -201,36 +207,49 @@ dashboard/
       main.jsx                   React entry point
       App.jsx                    BrowserRouter + 10 routes (/leaderboard redirects to /jobs)
       index.css                  minimal body reset (Tailwind via CDN)
-      components/Layout.jsx      glass sidebar (gradient brand, grouped nav w/ active rail,
-                                   theme toggle, pipeline status w/ live ping) + glass topbar
-                                   (search, gradient Run Pipeline btn with live status polling)
+      components/Layout.jsx      glass sidebar (shimmer-text brand + online dot, gradient sheen,
+                                   neon-line dividers, grouped nav — active item = full gradient-accent
+                                   fill, theme toggle) + glass topbar (search, pipeline status chip
+                                   linking to /pipeline page); Run Pipeline button removed from
+                                   topbar — pipeline control lives at /pipeline
       components/charts.jsx      dependency-free SVG charts: DonutChart, AreaChart (glow line),
                                    HBarList, ColumnChart, ScoreRing, GrowBar — colors from CSS vars
       components/ui.jsx          PageHeader (gradient title), Card (glass + optional hover),
-                                   StatCard (glow icon tile), ScoreChip (conic progress ring),
-                                   ModePill, TrackerBadge, TRACKER_META, CloudFitPill, CloudChips,
+                                   StatCard (glow icon tile, filled icon, ring+directional glow),
+                                   ScoreChip (conic progress ring + colored glow), ModePill,
+                                   TrackerBadge, TRACKER_META, CloudFitPill, CloudChips,
                                    CLOUD_FIT_META, relativeTime(), EmptyState, Loading, Skeleton,
-                                   input/select classes
+                                   inputCls / selectCls (softer border, backdrop-blur, rounded-xl)
       components/EmailComposer.jsx  modal for AI-drafting + editing + sending a cold email for a
                                    job; calls /generate-email then /send-email; used by AtsDetail,
                                    Jobs, and Tracker
-      pages/Overview.jsx         landing: KPI cards (incl. Hot Leads) · funnel w/ conversion % ·
+      pages/Overview.jsx         landing: KPI cards (animated count-up) · funnel w/ conversion % ·
                                    score donut · work-mode + cloud-fit donuts · scrape trend ·
-                                   top jobs · extraction health
+                                   staggered top jobs · extraction health
       pages/Analytics.jsx        market insights: skill demand · companies · cloud demand ·
                                    scoring models · apply channels · experience donut · locations ·
                                    score trend · resume profile
+      pages/Pipeline.jsx         pipeline monitor: 4-stage DAG flow (Scrape→Extract→Filter→Score)
+                                   with animated SVG flow edges + per-stage metrics (current session
+                                   vs all-time); Configure & Run (--days/--limit/--visible);
+                                   Stop button; live colorized run log terminal (auto-refresh 10s)
       pages/Jobs.jsx             filterable jobs table — filters: score/mode/cloud_fit/posted-age/
-                                   has-email/tracker-status/search/sort; Posted + Cloud columns;
-                                   save-to-tracker
-      pages/Tracker.jsx          application tracker kanban: saved→applied→interviewing→offer/rejected
-      pages/AtsDetail.jsx        full job breakdown: sub-scores · skills · predictions · cloud +
-                                   posted-age badges · Outreach Playbook (subject format, required
-                                   fields, email history) · tracker control · generate/send email
+                                   has-email/tracker-status/search/sort/"Net New" (unsent only);
+                                   animated stat cards; bulk send with minimize/stop/skipped state
+      pages/Tracker.jsx          application tracker kanban: saved→applied→interviewing→offer/rejected;
+                                   pop-in card animations with stagger
+      pages/AtsDetail.jsx        full job breakdown: count-up score ring · sub-scores (staggered) ·
+                                   skills/keywords (pop-in chips) · predictions · cloud + posted-age
+                                   badges · Outreach Playbook · tracker control · generate/send email
       pages/SkillsGap.jsx        gap skill bars · avg score ring · top resume changes · keyword cloud
-      pages/Recruiters.jsx       recruiter directory with search
-      pages/Outreach.jsx         sent-email history + missing candidate_info.txt fields
-      pages/RawData.jsx          paginated raw posts browser (shows posted_at + scraped_at)
+                                   (pop-in chips with stagger)
+      pages/Recruiters.jsx       card grid (staggered fade-up); click card → slide-in right drawer
+                                   showing all recruiter posts with score, skills, cloud, email hints;
+                                   animated count-up stats; click post → navigate to ATS detail
+      pages/Outreach.jsx         sent-email history + missing candidate_info.txt fields;
+                                   animated KPI stat cards
+      pages/RawData.jsx          paginated raw posts browser (shows posted_at + scraped_at);
+                                   staggered fade-up card entrances
 
 model/
   train.py                       incremental spaCy NER trainer — reads normalized_posts WHERE
@@ -506,16 +525,19 @@ All under `/api/` — Flask server on port 5000, proxied by Vite on port 5173.
 | `/api/jobs` | GET | scored jobs (incl. `tracker_status`, `posted_at`, `cloud_fit`, `clouds_list`); params: `score_min`, `work_mode`, `cloud_fit`, `posted_within` (hours), `has_email`, `tracker`, `q`, `sort` (score/date/posted/interview) |
 | `/api/jobs/<id>` | GET | full job detail (incl. tracker status/notes, `posted_at`, `clouds_list`, `email_required_list`, `email_subject_format`, `outreach_history`) |
 | `/api/jobs/<id>/generate-email` | POST | AI-generate `{subject, body, missing_fields}` via outreach builder cascade |
-| `/api/jobs/<id>/send-email` | POST | send `{subject, body, to_email}` via Gmail SMTP; logs to `email_outreach`; auto-marks tracker `applied` |
+| `/api/jobs/<id>/send-email` | POST | send `{subject, body, to_email}` via Gmail SMTP; logs to `email_outreach`; auto-marks tracker `applied`; returns 409 if already sent for this job |
 | `/api/skills-gap` | GET | critical_gap_skills frequency across all ats_scores, top 20 |
 | `/api/recruiters` | GET | unique recruiters grouped by email; includes avg/best score, post count |
+| `/api/recruiters/<email>/posts` | GET | all posts from a specific recruiter (by email) with full extracted fields, cloud_fit, and ATS score |
 | `/api/raw-posts` | GET | paginated raw_posts joined with normalized + scores (incl. `posted_at`); params: `page`, `limit`, `q` |
 | `/api/tracker` | GET | all tracked jobs with status + job info + interview probability |
 | `/api/tracker/<target_id>` | POST | upsert `{status, notes}`; status ∈ saved/applied/interviewing/offer/rejected |
 | `/api/tracker/<target_id>` | DELETE | remove job from tracker |
 | `/api/outreach` | GET | sent-email history from `email_outreach` joined with job + score; totals sent/failed |
-| `/api/pipeline-status` | GET | `running` flag, pending extraction count, unscored targets, last run time |
-| `/api/run-pipeline` | POST | spawns `python main.py` as background subprocess (no-op if already running) |
+| `/api/pipeline-status` | GET | running flag, per-stage metrics (`stages.scrape/extract/filter/score`) with `current` (session) + `total` (all-time), `started_at`, `args`, pending/unscored counts, last run time |
+| `/api/pipeline-log` | GET | last 200 lines of `data/pipeline_run.log` from the most recent run; `{"lines": [...]}` |
+| `/api/run-pipeline` | POST | spawns `python main.py` in background; body `{days, limit, visible}` controls args; logs stdout+stderr to `data/pipeline_run.log`; no-op if already running |
+| `/api/stop-pipeline` | POST | SIGTERM the pipeline process group; escalates to SIGKILL after 3s; also pkills any other project scripts (rescore, send_outreach, etc.) |
 | `/api/train-ner/status` | GET | NER training state: running, last_run, untrained_count, error |
 | `/api/train-ner` | POST | trigger incremental NER training in background; body `{"all":true}` to retrain from scratch |
 | `/api/missing-fields` | GET | fields recruiter asked for that were missing from candidate_info.txt; sorted by frequency |
@@ -637,14 +659,22 @@ batching all matched jobs in one go (e.g. `--min-score 0 --auto-send`).
   regression here: edits to `.jsx` files don't appear until a manual server restart.
 - Theming: light/dark via CSS variables in `index.html` (`:root` = light, `.dark` = dark)
   mapped to semantic Tailwind tokens (`bg`, `surface`, `surface-2/3`, `ink`, `muted`, `faint`,
-  `accent`, `accent-2`, `line`, `--chart-1..6`). The accent is a two-stop gradient
-  (`accent` → `accent-2`); reusable visual helpers live in `index.html`'s `<style>`:
-  `.card` (frosted glass + hairline), `.card-hover`, `.gradient-text`, `.gradient-accent`,
-  `.glow-accent`, and `.fade-up`/`.fade-up-1..6` staggered entrance. An ambient aurora glow
-  (`body::before`) sits behind content; all motion respects `prefers-reduced-motion`. Charts in
-  `charts.jsx` reference `rgb(var(--…))` directly so they re-theme automatically. Toggle persists
-  to `localStorage('jh-theme')`; head script applies it before first paint. When adding UI: use
+  `accent`, `accent-2`, `line`, `--chart-1..6`, `--shadow-accent`). The accent is a two-stop
+  gradient (`accent` → `accent-2`); reusable visual helpers live in `index.html`'s `<style>`:
+  `.card` (frosted glass 18px blur + hairline + `overflow:hidden`), `.card-hover` (lift+accent
+  border on hover), `.card-premium` (gradient border via CSS mask), `.gradient-text`,
+  `.gradient-accent`, `.glow-accent`, `.neon-line` (accent gradient divider), `.icon-glow`,
+  `.shimmer-text` (animated sweep for brand text), `.fade-up`/`.fade-up-1..6` staggered entrance,
+  `.slide-right` (drawer animation), `.fade-in` (overlay/backdrop), `.pop-in` (spring chip),
+  `.avatar-glow` (group-hover accent ring), `.score-in` (score number reveal).
+  Two ambient layers sit behind `#root`: `body::before` (4-blob aurora glow, 26s drift) and
+  `body::after` (subtle dot-grid texture, masked to top). Charts in `charts.jsx` reference
+  `rgb(var(--…))` directly so they re-theme automatically. Toggle persists to
+  `localStorage('jh-theme')`; head script applies it before first paint. When adding UI: use
   semantic tokens and these helpers, never hardcode hex colors.
+- Animation hooks: `useCountUp(target, duration=750)` — ease-out cubic count-up for stat numbers;
+  `staggerDelay(i, step, cap)` — linear stagger with ceiling for card/chip lists; both are
+  copy-pasted as file-local functions in each page (not yet extracted to a shared hook).
 - `db/database.py` runs additive migrations on `init_db()`: adds `skills`, `is_trained`
   columns to `normalized_posts` if missing; adds `tailored_resume_path`, `provider` columns
   to `ats_scores` if missing; collapses legacy `UNIQUE(target_job_id, provider)` constraint

@@ -7,6 +7,31 @@ import {
   CloudFitPill, relativeTime, EmptyState, Loading, inputCls, selectCls,
 } from '../components/ui'
 
+function useCountUp(target, duration = 750) {
+  const [val, setVal] = useState(0)
+  const raf = useRef(null)
+  useEffect(() => {
+    const n = Number(target)
+    if (!n) { setVal(0); return }
+    let start = null
+    const tick = (ts) => {
+      if (!start) start = ts
+      const p = Math.min((ts - start) / duration, 1)
+      const eased = 1 - Math.pow(1 - p, 3)
+      setVal(Math.round(eased * n))
+      if (p < 1) raf.current = requestAnimationFrame(tick)
+    }
+    raf.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf.current)
+  }, [target, duration])
+  return val
+}
+
+function AnimatedStatCard({ icon, label, value, tone }) {
+  const counted = useCountUp(typeof value === 'number' ? value : 0)
+  return <StatCard icon={icon} label={label} value={typeof value === 'number' ? counted : value} tone={tone} />
+}
+
 export default function Jobs() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -23,12 +48,15 @@ export default function Jobs() {
   const [search, setSearch] = useState(searchParams.get('q') || '')
   const [searchInput, setSearchInput] = useState(searchParams.get('q') || '')
   const [composing, setComposing] = useState(null)
+  const [netNew, setNetNew] = useState(false)
 
   // Bulk email state
   const [selected, setSelected] = useState(new Set())
   const [bulkStatus, setBulkStatus] = useState(null)   // null | 'sending' | 'done'
   const [bulkResults, setBulkResults] = useState([])
   const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 })
+  const [bulkMinimized, setBulkMinimized] = useState(false)
+  const abortBulk = useRef(false)
 
   const loadJobs = useCallback(async () => {
     setLoading(true)
@@ -104,6 +132,8 @@ export default function Jobs() {
 
   async function bulkSend(targetIds) {
     if (!targetIds.length) return
+    abortBulk.current = false
+    setBulkMinimized(false)
     setBulkStatus('sending')
     setBulkProgress({ current: 0, total: targetIds.length })
     setBulkResults(targetIds.map(id => {
@@ -112,6 +142,10 @@ export default function Jobs() {
     }))
 
     for (let i = 0; i < targetIds.length; i++) {
+      if (abortBulk.current) {
+        setBulkResults(prev => prev.map(r => r.status === 'pending' ? { ...r, status: 'skipped' } : r))
+        break
+      }
       const id = targetIds[i]
       setBulkProgress({ current: i + 1, total: targetIds.length })
       try {
@@ -165,10 +199,12 @@ export default function Jobs() {
     { value: 'rejected',     label: 'Rejected',     dot: 'bg-danger'   },
   ]
 
-  // Client-side tracker filter (multi-select) — must be before derived counts
-  const displayedJobs = trackerFilter.size === 0 ? jobs : jobs.filter(j =>
-    trackerFilter.has(j.tracker_status || 'untracked')
-  )
+  // Client-side filters — tracker multi-select + net-new toggle
+  const displayedJobs = jobs.filter(j => {
+    if (trackerFilter.size > 0 && !trackerFilter.has(j.tracker_status || 'untracked')) return false
+    if (netNew && (j.email_sent_count || 0) > 0) return false
+    return true
+  })
 
   const highMatch   = displayedJobs.filter(j => (j.final_ats_score || 0) >= 60).length
   const awsMatch    = displayedJobs.filter(j => j.cloud_fit === 'aws_match').length
@@ -177,11 +213,11 @@ export default function Jobs() {
   const selectedCount = selectedIds.length
 
   const anyFilterActive = mode !== 'all' || scoreMin !== '0' || cloudFit !== 'aws_match' ||
-    postedWithin !== '24' || trackerFilter.size > 0 || sortBy !== 'score' || search
+    postedWithin !== '24' || trackerFilter.size > 0 || sortBy !== 'score' || search || netNew
 
   function resetFilters() {
     setMode('all'); setScoreMin('0'); setCloudFit('aws_match'); setPostedWithin('24')
-    setTrackerFilter(new Set()); setSortBy('score'); setSearchInput(''); setSearch('')
+    setTrackerFilter(new Set()); setSortBy('score'); setSearchInput(''); setSearch(''); setNetNew(false)
   }
 
   return (
@@ -189,14 +225,14 @@ export default function Jobs() {
       <PageHeader title="Jobs" subtitle="Every job that passed your filters, ranked by ATS score against your resume." />
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-5 mb-6">
-        <StatCard icon="query_stats" label="Matched Jobs" value={jobs.length} tone="accent" />
-        <StatCard icon="check_circle" label="Score ≥ 60" value={highMatch} tone="success" />
-        <StatCard icon="cloud_done" label="AWS Match" value={awsMatch} tone="warning" />
-        <StatCard icon="bolt" label="Fresh (≤48h)" value={freshCount} tone="info" />
+        <div className="fade-up fade-up-1"><AnimatedStatCard icon="query_stats" label="Matched Jobs" value={jobs.length} tone="accent" /></div>
+        <div className="fade-up fade-up-2"><AnimatedStatCard icon="check_circle" label="Score ≥ 60" value={highMatch} tone="success" /></div>
+        <div className="fade-up fade-up-3"><AnimatedStatCard icon="cloud_done" label="AWS Match" value={awsMatch} tone="warning" /></div>
+        <div className="fade-up fade-up-4"><AnimatedStatCard icon="bolt" label="Fresh (≤48h)" value={freshCount} tone="info" /></div>
       </div>
 
       {/* ── Filters ─────────────────────────────────────────────────────── */}
-      <div className="card rounded-2xl p-4 mb-4 space-y-3">
+      <div className="card rounded-2xl p-4 mb-4 space-y-3 fade-up" style={{ animationDelay: '0.2s' }}>
         {/* Row 1 — Search + Score + Age + actions */}
         <div className="flex items-center gap-2 w-3/4">
           <div className="relative w-[264px] flex-shrink-0">
@@ -231,7 +267,7 @@ export default function Jobs() {
           </button>
         </div>
 
-        {/* Row 2 — Cloud + Mode pill toggles */}
+        {/* Row 2 — Cloud + Mode pill toggles + Net New */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="pill-group">
             {CLOUD_FILTERS.map(([v, lbl]) => (
@@ -251,12 +287,20 @@ export default function Jobs() {
               </button>
             ))}
           </div>
+          <button onClick={() => setNetNew(v => !v)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
+              netNew
+                ? 'gradient-accent text-accent-ink shadow glow-accent'
+                : 'text-muted hover:text-ink bg-surface-2 border border-line'}`}>
+            <span className="material-symbols-outlined text-[13px]">mark_email_unread</span>
+            Net New
+          </button>
         </div>
       </div>
 
       {/* ── Bulk action bar ──────────────────────────────────────────────── */}
       {sendableIds.length > 0 && (
-        <div className="card rounded-xl px-4 py-2.5 mb-4 flex items-center gap-3 border-l-[3px] border-accent">
+        <div className="card rounded-xl px-4 py-2.5 mb-4 flex items-center gap-3 border-l-[3px] border-accent fade-up" style={{ animationDelay: '0.25s' }}>
           <span className="material-symbols-outlined text-[16px] text-accent flex-shrink-0">mark_email_unread</span>
           <span className="text-[12px] text-muted min-w-0">
             {selectedCount > 0
@@ -290,7 +334,7 @@ export default function Jobs() {
       )}
 
       {/* ── Jobs table ──────────────────────────────────────────────────── */}
-      <div className="card rounded-2xl overflow-hidden">
+      <div className="card rounded-2xl overflow-hidden fade-up" style={{ animationDelay: '0.3s' }}>
         <div className="overflow-x-auto custom-scrollbar">
           <table className="w-full text-left border-collapse">
             <thead className="bg-surface-2 border-b border-line">
@@ -298,7 +342,7 @@ export default function Jobs() {
                 {/* Select-all checkbox */}
                 <th className="pl-3 pr-5 py-3 w-12 border-r border-line">
                   {sendableIds.length > 0 && (
-                    <label className="flex items-center justify-center cursor-pointer" onClick={toggleSelectAll}
+                    <label className="flex items-center justify-center cursor-pointer"
                       title={allSelected ? 'Deselect all' : `Select all ${sendableIds.length} unsent`}>
                       <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="sr-only" />
                       <span className={`w-4 h-4 rounded flex items-center justify-center transition-all border-2 ${
@@ -347,7 +391,7 @@ export default function Jobs() {
 
                 return (
                   <tr key={j.target_id}
-                    className={`hover:bg-surface-2/60 transition-colors group cursor-pointer ${isSelected ? 'bg-accent/5' : ''}`}
+                    className={`hover:bg-surface-2/60 transition-all duration-150 group cursor-pointer ${isSelected ? 'bg-accent/5' : ''}`}
                     onClick={() => navigate(`/ats/${j.target_id}`)}>
 
                     {/* Checkbox — colored left border anchors here at the true row edge */}
@@ -371,7 +415,7 @@ export default function Jobs() {
                     </td>
 
                     {/* Score */}
-                    <td className="pl-4 pr-3 py-2.5">
+                    <td className="pl-4 pr-3 py-2.5 score-in">
                       <ScoreChip score={j.final_ats_score} />
                     </td>
 
@@ -504,77 +548,125 @@ export default function Jobs() {
 
       {/* ── Bulk send progress modal ───────────────────────────────────── */}
       {bulkStatus && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="card rounded-2xl w-full max-w-[460px] max-h-[80vh] flex flex-col overflow-hidden">
-
-            {/* Header */}
-            <div className="px-6 pt-5 pb-4 border-b border-line flex items-center gap-3">
-              {bulkStatus === 'done'
-                ? <span className="material-symbols-outlined text-[22px] text-success">task_alt</span>
-                : <span className="w-5 h-5 rounded-full border-2 border-accent border-t-transparent animate-spin flex-shrink-0" />}
-              <div className="min-w-0">
-                <h3 className="font-bold text-ink text-sm leading-tight">
-                  {bulkStatus === 'sending'
-                    ? `Sending ${bulkProgress.current} of ${bulkProgress.total}…`
-                    : 'Bulk send complete'}
-                </h3>
-                {bulkStatus === 'done' && (
-                  <p className="text-[11px] text-muted mt-0.5">
-                    <span className="text-success font-semibold">{bulkResults.filter(r => r.status === 'sent').length} sent</span>
-                    {bulkResults.filter(r => r.status === 'failed').length > 0 && (
-                      <span className="text-danger font-semibold ml-2">{bulkResults.filter(r => r.status === 'failed').length} failed</span>
-                    )}
-                  </p>
-                )}
-              </div>
-              {bulkStatus === 'sending' && (
-                <span className="ml-auto text-[11px] text-muted tabular-nums font-mono flex-shrink-0">
-                  {Math.round(bulkProgress.current / bulkProgress.total * 100)}%
-                </span>
-              )}
+        bulkMinimized ? (
+          /* Minimized floating bar */
+          <div className="fixed bottom-5 right-5 z-50 card rounded-xl px-4 py-3 flex items-center gap-3 shadow-xl border-l-[3px] border-accent min-w-[280px] fade-in">
+            {bulkStatus === 'done'
+              ? <span className="material-symbols-outlined text-[18px] text-success">task_alt</span>
+              : <span className="w-4 h-4 rounded-full border-2 border-accent border-t-transparent animate-spin flex-shrink-0" />}
+            <div className="flex-1 min-w-0">
+              <p className="text-[12px] font-bold text-ink leading-tight">
+                {bulkStatus === 'sending' ? `Sending ${bulkProgress.current} of ${bulkProgress.total}…` : 'Bulk send complete'}
+              </p>
+              <p className="text-[10px] text-muted mt-0.5">
+                <span className="text-success font-semibold">{bulkResults.filter(r => r.status === 'sent').length} sent</span>
+                {bulkResults.filter(r => r.status === 'failed').length > 0 && <span className="text-danger font-semibold ml-1.5">{bulkResults.filter(r => r.status === 'failed').length} failed</span>}
+                {bulkResults.filter(r => r.status === 'skipped').length > 0 && <span className="text-faint font-semibold ml-1.5">{bulkResults.filter(r => r.status === 'skipped').length} skipped</span>}
+              </p>
             </div>
-
-            {/* Progress bar */}
             {bulkStatus === 'sending' && (
-              <div className="h-1 bg-surface-2 flex-shrink-0">
-                <div className="h-full gradient-accent transition-all duration-500 rounded-r"
-                  style={{ width: `${bulkProgress.current / bulkProgress.total * 100}%` }} />
-              </div>
+              <button onClick={() => { abortBulk.current = true }} title="Stop sending"
+                className="text-faint hover:text-danger transition-colors flex-shrink-0">
+                <span className="material-symbols-outlined text-[18px]">stop_circle</span>
+              </button>
             )}
-
-            {/* Job list */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
-              {bulkResults.map(r => (
-                <div key={r.target_id}
-                  className={`flex items-start gap-2.5 p-2.5 rounded-lg transition-colors ${
-                    r.status === 'sent'    ? 'bg-success/5 border border-success/15'
-                  : r.status === 'failed' ? 'bg-danger/5 border border-danger/15'
-                  : 'bg-surface-2/50 border border-line/50'}`}>
-                  {r.status === 'sent'
-                    ? <span className="material-symbols-outlined text-[16px] text-success mt-0.5 flex-shrink-0">check_circle</span>
-                    : r.status === 'failed'
-                    ? <span className="material-symbols-outlined text-[16px] text-danger mt-0.5 flex-shrink-0">error</span>
-                    : <span className="w-4 h-4 rounded-full border-2 border-accent border-t-transparent animate-spin mt-0.5 flex-shrink-0" />}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[12px] font-semibold text-ink truncate leading-tight">{r.title}</p>
-                    {r.company && <p className="text-[10px] text-muted truncate">{r.company}</p>}
-                    {r.error && <p className="text-[10px] text-danger mt-0.5 break-words">{r.error}</p>}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Footer */}
+            <button onClick={() => setBulkMinimized(false)} title="Expand"
+              className="text-faint hover:text-ink transition-colors flex-shrink-0">
+              <span className="material-symbols-outlined text-[18px]">open_in_full</span>
+            </button>
             {bulkStatus === 'done' && (
-              <div className="px-6 py-4 border-t border-line">
-                <button onClick={() => { setBulkStatus(null); setBulkResults([]); setSelected(new Set()) }}
-                  className="w-full py-2.5 rounded-xl gradient-accent text-accent-ink text-sm font-bold hover:opacity-90 transition-opacity glow-accent">
-                  Done
-                </button>
-              </div>
+              <button onClick={() => { setBulkStatus(null); setBulkResults([]); setSelected(new Set()) }}
+                title="Dismiss" className="text-faint hover:text-ink transition-colors flex-shrink-0">
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
             )}
           </div>
-        </div>
+        ) : (
+          /* Full modal */
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in">
+            <div className="card rounded-2xl w-full max-w-[460px] max-h-[80vh] flex flex-col overflow-hidden slide-right">
+
+              {/* Header */}
+              <div className="px-6 pt-5 pb-4 border-b border-line flex items-center gap-3">
+                {bulkStatus === 'done'
+                  ? <span className="material-symbols-outlined text-[22px] text-success">task_alt</span>
+                  : <span className="w-5 h-5 rounded-full border-2 border-accent border-t-transparent animate-spin flex-shrink-0" />}
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-bold text-ink text-sm leading-tight">
+                    {bulkStatus === 'sending' ? `Sending ${bulkProgress.current} of ${bulkProgress.total}…` : 'Bulk send complete'}
+                  </h3>
+                  {bulkStatus === 'done' && (
+                    <p className="text-[11px] text-muted mt-0.5">
+                      <span className="text-success font-semibold">{bulkResults.filter(r => r.status === 'sent').length} sent</span>
+                      {bulkResults.filter(r => r.status === 'failed').length > 0 && <span className="text-danger font-semibold ml-2">{bulkResults.filter(r => r.status === 'failed').length} failed</span>}
+                      {bulkResults.filter(r => r.status === 'skipped').length > 0 && <span className="text-faint font-semibold ml-2">{bulkResults.filter(r => r.status === 'skipped').length} skipped</span>}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 ml-auto flex-shrink-0">
+                  {bulkStatus === 'sending' && (
+                    <>
+                      <span className="text-[11px] text-muted tabular-nums font-mono mr-2">
+                        {Math.round(bulkProgress.current / bulkProgress.total * 100)}%
+                      </span>
+                      <button onClick={() => { abortBulk.current = true }} title="Stop sending"
+                        className="p-1 rounded hover:bg-danger/10 text-faint hover:text-danger transition-colors">
+                        <span className="material-symbols-outlined text-[18px]">stop_circle</span>
+                      </button>
+                    </>
+                  )}
+                  <button onClick={() => setBulkMinimized(true)} title="Minimise"
+                    className="p-1 rounded hover:bg-surface-2 text-faint hover:text-ink transition-colors">
+                    <span className="material-symbols-outlined text-[18px]">remove</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Progress bar */}
+              {bulkStatus === 'sending' && (
+                <div className="h-1 bg-surface-2 flex-shrink-0">
+                  <div className="h-full gradient-accent transition-all duration-500 rounded-r"
+                    style={{ width: `${bulkProgress.current / bulkProgress.total * 100}%` }} />
+                </div>
+              )}
+
+              {/* Job list */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
+                {bulkResults.map(r => (
+                  <div key={r.target_id}
+                    className={`flex items-start gap-2.5 p-2.5 rounded-lg transition-colors ${
+                      r.status === 'sent'    ? 'bg-success/5 border border-success/15'
+                    : r.status === 'failed'  ? 'bg-danger/5 border border-danger/15'
+                    : r.status === 'skipped' ? 'bg-surface-2/30 border border-line/30 opacity-50'
+                    : 'bg-surface-2/50 border border-line/50'}`}>
+                    {r.status === 'sent'
+                      ? <span className="material-symbols-outlined text-[16px] text-success mt-0.5 flex-shrink-0">check_circle</span>
+                      : r.status === 'failed'
+                      ? <span className="material-symbols-outlined text-[16px] text-danger mt-0.5 flex-shrink-0">error</span>
+                      : r.status === 'skipped'
+                      ? <span className="material-symbols-outlined text-[16px] text-faint mt-0.5 flex-shrink-0">skip_next</span>
+                      : <span className="w-4 h-4 rounded-full border-2 border-accent border-t-transparent animate-spin mt-0.5 flex-shrink-0" />}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] font-semibold text-ink truncate leading-tight">{r.title}</p>
+                      {r.company && <p className="text-[10px] text-muted truncate">{r.company}</p>}
+                      {r.error && <p className="text-[10px] text-danger mt-0.5 break-words">{r.error}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Footer */}
+              {bulkStatus === 'done' && (
+                <div className="px-6 py-4 border-t border-line">
+                  <button onClick={() => { setBulkStatus(null); setBulkResults([]); setSelected(new Set()) }}
+                    className="w-full py-2.5 rounded-xl gradient-accent text-accent-ink text-sm font-bold hover:opacity-90 transition-opacity glow-accent">
+                    Done
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )
       )}
     </>
   )

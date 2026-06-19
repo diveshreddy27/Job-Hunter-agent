@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react'
 import { HBarList, ScoreRing } from '../components/charts'
 import { PageHeader, Card, Loading, EmptyState } from '../components/ui'
 
+function staggerDelay(i, step = 0.055, cap = 0.48) {
+  return `${Math.min(i * step, cap)}s`
+}
+
 export default function SkillsGap() {
   const [gaps, setGaps] = useState([])
   const [stats, setStats] = useState(null)
@@ -56,7 +60,7 @@ export default function SkillsGap() {
       </PageHeader>
 
       <div className="grid grid-cols-12 gap-5 mb-6">
-        <Card className="col-span-12 lg:col-span-8" title="Market Demand: Missing Skills" icon="analytics"
+        <Card className="col-span-12 lg:col-span-8 fade-up fade-up-1" title="Market Demand: Missing Skills" icon="analytics"
           action={<span className="text-[11px] text-faint font-mono">N = {analyzed} jobs</span>}>
           {gaps.length
             ? <HBarList
@@ -65,7 +69,7 @@ export default function SkillsGap() {
             : <EmptyState icon="psychology" title="No gap data yet" hint="Score some jobs first — gaps are computed from ATS results." />}
         </Card>
 
-        <div className="card rounded-2xl col-span-12 lg:col-span-4 p-6 flex flex-col items-center justify-center text-center gap-4">
+        <div className="card rounded-2xl col-span-12 lg:col-span-4 p-6 flex flex-col items-center justify-center text-center gap-4 fade-up fade-up-2">
           <ScoreRing score={stats.avg_score} size={170} label="Avg ATS Score" />
           <p className="text-sm text-muted leading-5">
             Closing the top 3 gaps above is the fastest way to move this number.
@@ -74,12 +78,12 @@ export default function SkillsGap() {
       </div>
 
       <div className="grid grid-cols-12 gap-5 mb-6">
-        <Card className="col-span-12" title="Most Recommended Resume Changes" icon="task_alt"
+        <Card className="col-span-12 fade-up fade-up-3" title="Most Recommended Resume Changes" icon="task_alt"
           action={<span className="text-[11px] text-faint font-mono">aggregated from all ATS evaluations</span>}>
           {topActions.length ? (
             <div className="grid md:grid-cols-2 gap-3">
               {topActions.map(([a, cnt], i) => (
-                <div key={i} className="flex gap-3 p-3.5 bg-surface-2 rounded-xl">
+                <div key={i} className="flex gap-3 p-3.5 bg-surface-2 rounded-xl fade-up" style={{ animationDelay: staggerDelay(i, 0.07, 0.42) }}>
                   <div className="w-7 h-7 rounded-full bg-accent text-accent-ink flex items-center justify-center font-bold text-xs shrink-0">{i + 1}</div>
                   <div className="min-w-0">
                     <p className="text-[13px] text-ink leading-5">{a}</p>
@@ -92,7 +96,7 @@ export default function SkillsGap() {
         </Card>
       </div>
 
-      <Card title="Global Keyword Injections" icon="key"
+      <Card className="fade-up fade-up-4" title="Global Keyword Injections" icon="key"
         action={
           <button onClick={copyAll}
             className="border border-accent text-accent px-3.5 py-1.5 rounded-lg text-xs font-semibold hover:bg-accent/10 transition-colors">
@@ -101,7 +105,7 @@ export default function SkillsGap() {
         }>
         <p className="text-muted text-xs -mt-2 mb-4">Most-requested missing terms across all scored jobs. Bigger tier = more demand.</p>
         <div className="flex flex-wrap gap-2.5">
-          {sortedKwds.map(([k, cnt]) => {
+          {sortedKwds.map(([k, cnt], i) => {
             const tier = cnt / maxKwd
             const cls = tier > 0.6
               ? 'bg-accent/15 text-accent font-bold'
@@ -110,7 +114,8 @@ export default function SkillsGap() {
               : 'bg-surface-2 text-muted'
             return (
               <span key={k} title={`${cnt} job${cnt > 1 ? 's' : ''}`}
-                className={`px-3 py-1.5 rounded-full text-xs font-mono ${cls}`}>
+                className={`px-3 py-1.5 rounded-full text-xs font-mono pop-in ${cls}`}
+                style={{ animationDelay: staggerDelay(i, 0.025, 0.48) }}>
                 {k}
               </span>
             )
